@@ -1,0 +1,30 @@
+{
+  "name": "react-geogebra",
+  "version": "1.0.0",
+  "description": "React-based geometric drawing system inspired by GeoGebra",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "react": ">=17.0.0",
+    "react-dom": ">=17.0.0",
+    "ts-geogebra-core": "file:../ts-geogebra-core"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.0",
+    "react-dom": ">=17.0.0"
+  }
+}
