@@ -1,70 +1,147 @@
 import React from 'react';
+import { 
+  Move, 
+  CircleDot, 
+  Minus, 
+  Slash, 
+  Circle, 
+  Hexagon,
+  ArrowRight,
+  X,
+  Target,
+  Trash2,
+  MousePointer2,
+  Hand,
+  ZoomIn,
+  ZoomOut,
+  Undo2,
+  Redo2
+} from 'lucide-react';
 import { ToolMode } from '../types';
 import { useGeoGebra } from '../core/GeoGebraContext';
+import { cn } from '../lib/utils';
 
 interface ToolButton {
   mode: ToolMode;
   label: string;
-  icon: string;
+  icon: React.ReactNode;
   description: string;
 }
 
 const tools: ToolButton[] = [
-  { mode: 'move', label: '移动', icon: '↔', description: '移动和拖动对象' },
-  { mode: 'point', label: '点', icon: '•', description: '创建点' },
-  { mode: 'segment', label: '线段', icon: '—', description: '创建线段（两点）' },
-  { mode: 'line', label: '直线', icon: '/', description: '创建直线' },
-  { mode: 'circle', label: '圆', icon: '○', description: '创建圆（圆心和半径）' },
-  { mode: 'polygon', label: '多边形', icon: '△', description: '创建多边形' },
-  { mode: 'vector', label: '向量', icon: '→', description: '创建向量' },
-  { mode: 'intersect', label: '交点', icon: '×', description: '创建交点' },
-  { mode: 'midpoint', label: '中点', icon: '⊙', description: '创建中点' },
-  { mode: 'delete', label: '删除', icon: '×', description: '删除对象' },
+  { mode: 'move', label: '移动', icon: <MousePointer2 size={18} />, description: '移动和拖动对象' },
+  { mode: 'pan', label: '抓手', icon: <Hand size={18} />, description: '拖拽坐标系' },
+  { mode: 'point', label: '点', icon: <CircleDot size={18} />, description: '创建点' },
+  { mode: 'segment', label: '线段', icon: <Minus size={18} />, description: '创建线段（两点）' },
+  { mode: 'line', label: '直线', icon: <Slash size={18} />, description: '创建直线' },
+  { mode: 'circle', label: '圆', icon: <Circle size={18} />, description: '创建圆（圆心和半径）' },
+  { mode: 'polygon', label: '多边形', icon: <Hexagon size={18} />, description: '创建多边形' },
+  { mode: 'vector', label: '向量', icon: <ArrowRight size={18} />, description: '创建向量' },
+  { mode: 'intersect', label: '交点', icon: <Target size={18} />, description: '创建交点' },
+  { mode: 'midpoint', label: '中点', icon: <CircleDot size={18} strokeWidth={1} />, description: '创建中点' },
+  { mode: 'delete', label: '删除', icon: <Trash2 size={18} />, description: '删除对象' },
 ];
 
 interface ToolbarProps {
   className?: string;
   style?: React.CSSProperties;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
 }
 
-export function Toolbar({ className, style }: ToolbarProps): React.ReactElement {
-  const { state, setMode } = useGeoGebra();
+export function Toolbar({ className, style, onZoomIn, onZoomOut }: ToolbarProps): React.ReactElement {
+  const { state, setMode, undo, redo, canUndo, canRedo } = useGeoGebra();
 
   return (
     <div
-      className={className}
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        gap: '4px',
-        padding: '8px',
-        backgroundColor: '#f5f5f5',
-        borderBottom: '1px solid #ddd',
-        ...style,
-      }}
+      className={cn(
+        'flex items-center gap-1 px-3 py-2 bg-white border-b border-gray-200',
+        className
+      )}
+      style={style}
     >
-      {tools.map((tool) => (
-        <button
-          key={tool.mode}
-          onClick={() => setMode(tool.mode)}
-          title={tool.description}
-          style={{
-            width: '40px',
-            height: '40px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '18px',
-            border: state.interaction.mode === tool.mode ? '2px solid #0066cc' : '1px solid #ccc',
-            borderRadius: '4px',
-            backgroundColor: state.interaction.mode === tool.mode ? '#e6f2ff' : '#fff',
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-          }}
-        >
-          {tool.icon}
-        </button>
-      ))}
+      {tools.map((tool) => {
+        const isActive = state.interaction.mode === tool.mode;
+        return (
+          <button
+            key={tool.mode}
+            onClick={() => setMode(tool.mode)}
+            title={tool.description}
+            className={cn(
+              'flex items-center justify-center w-9 h-9 rounded-md transition-all duration-200',
+              'hover:bg-gray-100 active:scale-95',
+              'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1',
+              isActive 
+                ? 'bg-blue-100 text-blue-600 ring-1 ring-blue-500' 
+                : 'bg-white text-gray-600 hover:text-gray-900'
+            )}
+          >
+            {tool.icon}
+          </button>
+        );
+      })}
+      
+      <div className="w-px h-6 bg-gray-200 mx-2" />
+      
+      <button
+        onClick={onZoomIn}
+        title="放大"
+        className={cn(
+          'flex items-center justify-center w-9 h-9 rounded-md transition-all duration-200',
+          'hover:bg-gray-100 active:scale-95',
+          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1',
+          'bg-white text-gray-600 hover:text-gray-900'
+        )}
+      >
+        <ZoomIn size={18} />
+      </button>
+      
+      <button
+        onClick={onZoomOut}
+        title="缩小"
+        className={cn(
+          'flex items-center justify-center w-9 h-9 rounded-md transition-all duration-200',
+          'hover:bg-gray-100 active:scale-95',
+          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1',
+          'bg-white text-gray-600 hover:text-gray-900'
+        )}
+      >
+        <ZoomOut size={18} />
+      </button>
+      
+      <div className="w-px h-6 bg-gray-200 mx-2" />
+      
+      <button
+        onClick={undo}
+        disabled={!canUndo}
+        title="撤销 (Ctrl+Z)"
+        className={cn(
+          'flex items-center justify-center w-9 h-9 rounded-md transition-all duration-200',
+          'hover:bg-gray-100 active:scale-95',
+          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1',
+          canUndo
+            ? 'bg-white text-gray-600 hover:text-gray-900'
+            : 'bg-gray-50 text-gray-300 cursor-not-allowed'
+        )}
+      >
+        <Undo2 size={18} />
+      </button>
+      
+      <button
+        onClick={redo}
+        disabled={!canRedo}
+        title="重做 (Ctrl+Y)"
+        className={cn(
+          'flex items-center justify-center w-9 h-9 rounded-md transition-all duration-200',
+          'hover:bg-gray-100 active:scale-95',
+          'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1',
+          canRedo
+            ? 'bg-white text-gray-600 hover:text-gray-900'
+            : 'bg-gray-50 text-gray-300 cursor-not-allowed'
+        )}
+      >
+        <Redo2 size={18} />
+      </button>
     </div>
   );
 }

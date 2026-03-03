@@ -1,12 +1,12 @@
-import { GeoElement, ConstructionElement, AlgoElement } from './index';
+import { CoreGeoElement, ConstructionElement, AlgoElement } from '../../types';
 import { Construction } from '../dependency/Construction';
 import { Path, PathParameter, Pathable } from './Path';
 
 /**
  * 几何元素基类
- * 实现了 GeoElement 接口
+ * 实现了 CoreGeoElement 接口
  */
-export class GeoElementBase implements GeoElement, ConstructionElement {
+export class GeoElementBase implements CoreGeoElement, ConstructionElement {
   private label: string = '';
   private defined: boolean = true;
   private parentAlgorithm: AlgoElement | null = null;

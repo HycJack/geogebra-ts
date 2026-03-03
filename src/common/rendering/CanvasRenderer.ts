@@ -1,485 +1,444 @@
-import { CoordinateSystem } from '../coordinates/CoordinateSystem';
-import { RenderCommand } from '../drawable/types';
-import { Renderer, RenderOptions } from './types';
 import type { Drawable } from '../drawable/Drawable';
 
-/**
- * Canvas 渲染器
- * 将绘制对象渲染为 Canvas 2D 图形
- */
-export class CanvasRenderer implements Renderer {
-  private container: HTMLElement | null = null;
+export interface RendererOptions {
+  showGrid?: boolean;
+  showAxes?: boolean;
+  backgroundColor?: string;
+}
+
+export class CanvasRenderer {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
-  private coordSystem: CoordinateSystem;
-  private options: RenderOptions;
+  private width: number = 800;
+  private height: number = 600;
+  private centerX: number = 400;
+  private centerY: number = 300;
+  private scale: number = 50;
+  private offsetX: number = 0;
+  private offsetY: number = 0;
   private devicePixelRatio: number = 1;
+  
+  private options: Required<RendererOptions>;
 
-  constructor(coordSystem: CoordinateSystem, options?: Partial<RenderOptions>) {
-    this.coordSystem = coordSystem;
+  constructor(options?: RendererOptions) {
     this.options = {
-      showGrid: true,
-      showAxes: true,
-      antialias: true,
-      backgroundColor: '#ffffff',
-      ...options,
+      showGrid: options?.showGrid ?? true,
+      showAxes: options?.showAxes ?? true,
+      backgroundColor: options?.backgroundColor ?? '#ffffff',
     };
     this.devicePixelRatio = window.devicePixelRatio || 1;
   }
 
-  /**
-   * 初始化渲染器
-   * @param container 容器元素或 canvas 元素
-   */
-  initialize(container: HTMLElement | HTMLCanvasElement): void {
-    if (container instanceof HTMLCanvasElement) {
-      // 使用现有的 canvas 元素
-      this.canvas = container;
-      this.container = container.parentElement;
-      
-      // 设置实际像素尺寸
-      const rect = container.getBoundingClientRect();
-      this.resize(rect.width, rect.height);
-    } else {
-      // 创建新的 canvas 元素
-      this.container = container;
-      this.canvas = document.createElement('canvas');
-      this.canvas.style.width = '100%';
-      this.canvas.style.height = '100%';
-      this.canvas.style.display = 'block';
-      
-      // 设置实际像素尺寸
-      const rect = container.getBoundingClientRect();
-      this.resize(rect.width, rect.height);
-      
-      container.appendChild(this.canvas);
-    }
-    
-    // 获取 2D 上下文
-    const ctx = this.canvas.getContext('2d');
+  initialize(canvas: HTMLCanvasElement): void {
+    this.canvas = canvas;
+    const ctx = canvas.getContext('2d');
     if (!ctx) {
       throw new Error('无法获取 Canvas 2D 上下文');
     }
     this.ctx = ctx;
-    
-    // 设置抗锯齿
-    if (this.options.antialias) {
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-    }
+    this.resize();
   }
 
-  /**
-   * 调整画布大小
-   */
-  resize(width: number, height: number): void {
+  resize(): void {
     if (!this.canvas) return;
     
-    // 设置 CSS 样式大小
-    this.canvas.style.width = `${width}px`;
-    this.canvas.style.height = `${height}px`;
+    const rect = this.canvas.getBoundingClientRect();
     
-    // 设置实际像素尺寸（考虑设备像素比）
-    this.canvas.width = width * this.devicePixelRatio;
-    this.canvas.height = height * this.devicePixelRatio;
-    
-    // 更新坐标系统
-    this.coordSystem.setViewSize(width, height);
-  }
-
-  /**
-   * 销毁渲染器
-   */
-  destroy(): void {
-    if (this.canvas && this.container) {
-      this.container.removeChild(this.canvas);
+    if (rect.width === 0 || rect.height === 0) {
+      return;
     }
-    this.canvas = null;
-    this.ctx = null;
-    this.container = null;
+    
+    this.width = rect.width;
+    this.height = rect.height;
+    this.centerX = this.width / 2;
+    this.centerY = this.height / 2;
+    
+    this.canvas.width = rect.width * this.devicePixelRatio;
+    this.canvas.height = rect.height * this.devicePixelRatio;
+    
+    this.ctx = this.canvas.getContext('2d');
+    if (this.ctx) {
+      this.ctx.scale(this.devicePixelRatio, this.devicePixelRatio);
+    }
   }
 
-  /**
-   * 清空画布
-   */
+  worldToScreen(x: number, y: number): { x: number; y: number } {
+    return {
+      x: this.centerX + x * this.scale + this.offsetX,
+      y: this.centerY - y * this.scale + this.offsetY
+    };
+  }
+
+  screenToWorld(x: number, y: number): { x: number; y: number } {
+    return {
+      x: (x - this.centerX - this.offsetX) / this.scale,
+      y: -(y - this.centerY - this.offsetY) / this.scale
+    };
+  }
+
   clear(): void {
-    if (!this.ctx || !this.canvas) return;
-    
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    
-    // 填充背景色
-    this.ctx.fillStyle = this.options.backgroundColor;
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    if (!this.ctx) return;
+    this.ctx.clearRect(0, 0, this.width, this.height);
   }
 
-  /**
-   * 渲染绘制对象
-   */
-  render(drawables: Drawable[]): void {
-    if (!this.ctx) return;
+  drawGrid(): void {
+    if (!this.ctx || !this.options.showGrid) return;
+
+    const mainGridStep = this.calculateAxisStep();
+    const subGridStep = mainGridStep / 2;
     
-    this.clear();
-    
-    // 保存上下文状态
-    this.ctx.save();
-    
-    // 应用设备像素比缩放
-    this.ctx.scale(this.devicePixelRatio, this.devicePixelRatio);
-    
-    // 绘制网格
-    if (this.options.showGrid) {
-      this.drawGrid();
+    const startX = Math.floor((-this.centerX - this.offsetX) / (subGridStep * this.scale)) * subGridStep;
+    const endX = Math.ceil((this.width - this.centerX - this.offsetX) / (subGridStep * this.scale)) * subGridStep;
+    const startY = Math.floor((-(this.height - this.centerY - this.offsetY)) / (subGridStep * this.scale)) * subGridStep;
+    const endY = Math.ceil((this.centerY + this.offsetY) / (subGridStep * this.scale)) * subGridStep;
+
+    for (let x = startX; x <= endX; x += subGridStep) {
+      const screenX = this.worldToScreen(x, 0).x;
+      const isMainGrid = Math.abs(x) % mainGridStep < 0.01;
+      
+      this.ctx.beginPath();
+      this.ctx.moveTo(screenX, 0);
+      this.ctx.lineTo(screenX, this.height);
+      
+      if (isMainGrid) {
+        this.ctx.strokeStyle = '#d1d5db';
+        this.ctx.lineWidth = 1;
+      } else {
+        this.ctx.strokeStyle = '#f3f4f6';
+        this.ctx.lineWidth = 0.5;
+      }
+      this.ctx.stroke();
     }
-    
-    // 绘制坐标轴
-    if (this.options.showAxes) {
-      this.drawAxes();
+
+    for (let y = startY; y <= endY; y += subGridStep) {
+      const screenY = this.worldToScreen(0, y).y;
+      const isMainGrid = Math.abs(y) % mainGridStep < 0.01;
+      
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, screenY);
+      this.ctx.lineTo(this.width, screenY);
+      
+      if (isMainGrid) {
+        this.ctx.strokeStyle = '#d1d5db';
+        this.ctx.lineWidth = 1;
+      } else {
+        this.ctx.strokeStyle = '#f3f4f6';
+        this.ctx.lineWidth = 0.5;
+      }
+      this.ctx.stroke();
     }
+  }
+
+  drawAxes(): void {
+    if (!this.ctx || !this.options.showAxes) return;
+
+    const origin = this.worldToScreen(0, 0);
+
+    this.ctx.strokeStyle = '#1f2937';
+    this.ctx.lineWidth = 2.5;
+    this.ctx.lineCap = 'round';
+    this.ctx.lineJoin = 'round';
+
+    this.ctx.beginPath();
+    this.ctx.moveTo(0, origin.y);
+    this.ctx.lineTo(this.width, origin.y);
+    this.ctx.stroke();
+
+    this.ctx.beginPath();
+    this.ctx.moveTo(origin.x, 0);
+    this.ctx.lineTo(origin.x, this.height);
+    this.ctx.stroke();
+
+    const arrowLength = 14;
+    const arrowWidth = 8;
     
-    // 渲染所有绘制对象
-    for (const drawable of drawables) {
-      if (drawable.isVisible()) {
-        const command = drawable.render();
-        this.renderCommand(command);
+    this.ctx.fillStyle = '#1f2937';
+    
+    const xArrowX = this.width - 1;
+    if (xArrowX > arrowLength && origin.y > arrowWidth && origin.y < this.height - arrowWidth) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(xArrowX, origin.y);
+      this.ctx.lineTo(xArrowX - arrowLength, origin.y - arrowWidth);
+      this.ctx.lineTo(xArrowX - arrowLength, origin.y + arrowWidth);
+      this.ctx.closePath();
+      this.ctx.fill();
+    }
+
+    const yArrowY = 1;
+    if (yArrowY < this.height - arrowLength && origin.x > arrowWidth && origin.x < this.width - arrowWidth) {
+      this.ctx.beginPath();
+      this.ctx.moveTo(origin.x, yArrowY);
+      this.ctx.lineTo(origin.x - arrowWidth, yArrowY + arrowLength);
+      this.ctx.lineTo(origin.x + arrowWidth, yArrowY + arrowLength);
+      this.ctx.closePath();
+      this.ctx.fill();
+    }
+
+    this.ctx.font = 'bold 15px Roboto, sans-serif';
+    this.ctx.fillStyle = '#1f2937';
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText('O', origin.x + 10, origin.y + 20);
+
+    const axisStep = this.calculateAxisStep();
+    const startX = Math.floor((-this.centerX - this.offsetX) / (axisStep * this.scale)) * axisStep;
+    const endX = Math.ceil((this.width - this.centerX - this.offsetX) / (axisStep * this.scale)) * axisStep;
+    const startY = Math.floor((-(this.height - this.centerY - this.offsetY)) / (axisStep * this.scale)) * axisStep;
+    const endY = Math.ceil((this.centerY + this.offsetY) / (axisStep * this.scale)) * axisStep;
+
+    this.ctx.font = '12px Roboto, sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'top';
+
+    for (let x = startX; x <= endX; x += axisStep) {
+      if (x === 0) continue;
+      const screenX = this.worldToScreen(x, 0).x;
+      
+      this.ctx.strokeStyle = '#6b7280';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.beginPath();
+      this.ctx.moveTo(screenX, origin.y - 5);
+      this.ctx.lineTo(screenX, origin.y + 5);
+      this.ctx.stroke();
+      
+      this.ctx.fillStyle = '#4b5563';
+      this.ctx.fillText(x.toString(), screenX, origin.y + 12);
+    }
+
+    this.ctx.textAlign = 'right';
+    this.ctx.textBaseline = 'middle';
+    for (let y = startY; y <= endY; y += axisStep) {
+      if (y === 0) continue;
+      const screenY = this.worldToScreen(0, y).y;
+      
+      this.ctx.strokeStyle = '#6b7280';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.beginPath();
+      this.ctx.moveTo(origin.x - 5, screenY);
+      this.ctx.lineTo(origin.x + 5, screenY);
+      this.ctx.stroke();
+      
+      this.ctx.fillStyle = '#4b5563';
+      this.ctx.fillText(y.toString(), origin.x - 14, screenY);
+    }
+
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'bottom';
+    this.ctx.font = 'bold 16px Roboto, sans-serif';
+    this.ctx.fillStyle = '#1f2937';
+    this.ctx.fillText('x', this.width - 18, origin.y - 18);
+    this.ctx.fillText('y', origin.x + 28, 18);
+  }
+
+  calculateAxisStep(): number {
+    const minPixelDistance = 60;
+    const baseSteps = [1, 2, 5, 10, 20, 50, 100];
+    
+    for (const step of baseSteps) {
+      const pixelDistance = step * this.scale;
+      if (pixelDistance >= minPixelDistance) {
+        return step;
       }
     }
     
-    // 恢复上下文状态
-    this.ctx.restore();
+    return baseSteps[baseSteps.length - 1];
   }
 
-  /**
-   * 渲染单个指令
-   */
-  private renderCommand(command: RenderCommand): void {
+  drawPoint(x: number, y: number, color: string = '#3366ff', radius: number = 5, label?: string): void {
     if (!this.ctx) return;
+
+    const screen = this.worldToScreen(x, y);
+
+    this.ctx.beginPath();
+    this.ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
+    this.ctx.fillStyle = color;
+    this.ctx.fill();
+
+    if (label) {
+      this.ctx.fillStyle = '#1f2937';
+      this.ctx.font = 'bold 12px sans-serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.textBaseline = 'bottom';
+      this.ctx.fillText(label, screen.x + 8, screen.y - 8);
+    }
+  }
+
+  drawSegment(x1: number, y1: number, x2: number, y2: number, color: string = '#000000', lineWidth: number = 2): void {
+    if (!this.ctx) return;
+
+    const screenStart = this.worldToScreen(x1, y1);
+    const screenEnd = this.worldToScreen(x2, y2);
+
+    this.ctx.beginPath();
+    this.ctx.moveTo(screenStart.x, screenStart.y);
+    this.ctx.lineTo(screenEnd.x, screenEnd.y);
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = lineWidth;
+    this.ctx.stroke();
+  }
+
+  drawLine(a: number, b: number, c: number, color: string = '#000000', lineWidth: number = 2): void {
+    if (!this.ctx) return;
+
+    const scale = Math.max(this.width, this.height) / this.scale * 2;
+    
+    let p1: { x: number; y: number };
+    let p2: { x: number; y: number };
+    
+    if (Math.abs(a) < 0.0001) {
+      p1 = { x: -scale, y: -c / b };
+      p2 = { x: scale, y: -c / b };
+    } else if (Math.abs(b) < 0.0001) {
+      p1 = { x: -c / a, y: -scale };
+      p2 = { x: -c / a, y: scale };
+    } else {
+      p1 = { x: -scale, y: -(a * -scale + c) / b };
+      p2 = { x: scale, y: -(a * scale + c) / b };
+    }
+
+    const screenStart = this.worldToScreen(p1.x, p1.y);
+    const screenEnd = this.worldToScreen(p2.x, p2.y);
+
+    this.ctx.beginPath();
+    this.ctx.moveTo(screenStart.x, screenStart.y);
+    this.ctx.lineTo(screenEnd.x, screenEnd.y);
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = lineWidth;
+    this.ctx.stroke();
+  }
+
+  drawCircle(centerX: number, centerY: number, radius: number, color: string = '#000000', lineWidth: number = 2, fillColor?: string): void {
+    if (!this.ctx) return;
+
+    const screenCenter = this.worldToScreen(centerX, centerY);
+    const screenRadius = radius * this.scale;
+
+    this.ctx.beginPath();
+    this.ctx.arc(screenCenter.x, screenCenter.y, screenRadius, 0, Math.PI * 2);
+    
+    if (fillColor) {
+      this.ctx.fillStyle = fillColor;
+      this.ctx.fill();
+    }
+    
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = lineWidth;
+    this.ctx.stroke();
+  }
+
+  drawPolygon(points: Array<{ x: number; y: number }>, color: string = '#000000', lineWidth: number = 2, fillColor?: string): void {
+    if (!this.ctx || points.length < 3) return;
+
+    const screenPoints = points.map(p => this.worldToScreen(p.x, p.y));
+
+    this.ctx.beginPath();
+    this.ctx.moveTo(screenPoints[0].x, screenPoints[0].y);
+    for (let i = 1; i < screenPoints.length; i++) {
+      this.ctx.lineTo(screenPoints[i].x, screenPoints[i].y);
+    }
+    this.ctx.closePath();
+
+    if (fillColor) {
+      this.ctx.fillStyle = fillColor;
+      this.ctx.fill();
+    }
+
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = lineWidth;
+    this.ctx.stroke();
+  }
+
+  render(drawables: Drawable[]): void {
+    this.clear();
+    this.drawGrid();
+    this.drawAxes();
+
+    for (const drawable of drawables) {
+      if (drawable.isVisible()) {
+        this.drawDrawable(drawable);
+      }
+    }
+  }
+
+  private drawDrawable(drawable: Drawable): void {
+    if (!this.ctx) return;
+    
+    const command = drawable.render();
+    if (!command) return;
     
     switch (command.type) {
       case 'circle':
-        this.drawCircle(command.props);
+        this.drawCircle(
+          command.props.cx,
+          command.props.cy,
+          command.props.r,
+          command.props.stroke || '#000000',
+          command.props.strokeWidth || 2,
+          command.props.fill
+        );
         break;
       case 'line':
-        this.drawLine(command.props);
-        break;
-      case 'rect':
-        this.drawRect(command.props);
-        break;
-      case 'path':
-        this.drawPath(command.props);
-        break;
-      case 'text':
-        this.drawText(command.props, command.children as string[]);
+        this.drawLine(
+          command.props.a || 0,
+          command.props.b || 1,
+          command.props.c || 0,
+          command.props.stroke || '#000000',
+          command.props.strokeWidth || 2
+        );
         break;
       case 'polygon':
-        this.drawPolygon(command.props);
-        break;
-      case 'group':
-        this.drawGroup(command.props, command.children as RenderCommand[]);
-        break;
-    }
-  }
-
-  /**
-   * 绘制圆形
-   */
-  private drawCircle(props: any): void {
-    if (!this.ctx) return;
-    
-    this.ctx.beginPath();
-    this.ctx.arc(props.cx, props.cy, props.r, 0, Math.PI * 2);
-    
-    if (props.fill && props.fill !== 'none') {
-      this.ctx.fillStyle = props.fill;
-      this.ctx.fill();
-    }
-    
-    if (props.stroke && props.stroke !== 'none') {
-      this.ctx.strokeStyle = props.stroke;
-      this.ctx.lineWidth = props.strokeWidth || 1;
-      this.ctx.stroke();
-    }
-  }
-
-  /**
-   * 绘制直线
-   */
-  private drawLine(props: any): void {
-    if (!this.ctx) return;
-    
-    this.ctx.beginPath();
-    this.ctx.moveTo(props.x1, props.y1);
-    this.ctx.lineTo(props.x2, props.y2);
-    
-    if (props.stroke && props.stroke !== 'none') {
-      this.ctx.strokeStyle = props.stroke;
-      this.ctx.lineWidth = props.strokeWidth || 1;
-      
-      if (props.strokeDasharray) {
-        this.ctx.setLineDash(props.strokeDasharray.split(',').map(Number));
-      } else {
-        this.ctx.setLineDash([]);
-      }
-      
-      this.ctx.stroke();
-      this.ctx.setLineDash([]);
-    }
-  }
-
-  /**
-   * 绘制矩形
-   */
-  private drawRect(props: any): void {
-    if (!this.ctx) return;
-    
-    if (props.fill && props.fill !== 'none') {
-      this.ctx.fillStyle = props.fill;
-      this.ctx.fillRect(props.x, props.y, props.width, props.height);
-    }
-    
-    if (props.stroke && props.stroke !== 'none') {
-      this.ctx.strokeStyle = props.stroke;
-      this.ctx.lineWidth = props.strokeWidth || 1;
-      this.ctx.strokeRect(props.x, props.y, props.width, props.height);
-    }
-  }
-
-  /**
-   * 绘制路径
-   */
-  private drawPath(props: any): void {
-    if (!this.ctx || !props.d) return;
-    
-    this.ctx.beginPath();
-    
-    // 解析 SVG 路径命令
-    const pathData = props.d as string;
-    const commands = pathData.match(/[MmLlHhVvCcSsQqTtAaZz][^MmLlHhVvCcSsQqTtAaZz]*/g);
-    
-    if (commands) {
-      for (const cmd of commands) {
-        const type = cmd[0];
-        const args = cmd.slice(1).trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
-        
-        switch (type) {
-          case 'M':
-            this.ctx.moveTo(args[0], args[1]);
-            break;
-          case 'L':
-            this.ctx.lineTo(args[0], args[1]);
-            break;
-          case 'C':
-            this.ctx.bezierCurveTo(args[0], args[1], args[2], args[3], args[4], args[5]);
-            break;
-          case 'Q':
-            this.ctx.quadraticCurveTo(args[0], args[1], args[2], args[3]);
-            break;
-          case 'Z':
-          case 'z':
-            this.ctx.closePath();
-            break;
+        if (command.props.points) {
+          const points = command.props.points.split(' ').map((pair: string) => {
+            const [x, y] = pair.split(',').map(Number);
+            return { x, y };
+          });
+          this.drawPolygon(
+            points,
+            command.props.stroke || '#000000',
+            command.props.strokeWidth || 2,
+            command.props.fill
+          );
         }
-      }
-    }
-    
-    if (props.fill && props.fill !== 'none') {
-      this.ctx.fillStyle = props.fill;
-      this.ctx.fill();
-    }
-    
-    if (props.stroke && props.stroke !== 'none') {
-      this.ctx.strokeStyle = props.stroke;
-      this.ctx.lineWidth = props.strokeWidth || 1;
-      this.ctx.stroke();
+        break;
     }
   }
 
-  /**
-   * 绘制文本
-   */
-  private drawText(props: any, children?: string[]): void {
-    if (!this.ctx || !children || children.length === 0) return;
-    
-    const text = children[0];
-    const fontSize = props.fontSize || 14;
-    const fontFamily = props.fontFamily || 'Arial';
-    
-    this.ctx.font = `${fontSize}px ${fontFamily}`;
-    this.ctx.fillStyle = props.fill || '#000000';
-    this.ctx.textAlign = props.textAnchor === 'middle' ? 'center' : props.textAnchor === 'end' ? 'right' : 'left';
-    this.ctx.textBaseline = props.dominantBaseline === 'middle' ? 'middle' : 'alphabetic';
-    
-    this.ctx.fillText(text, props.x, props.y);
+  setScale(scale: number): void {
+    this.scale = Math.max(1, Math.min(200, scale));
   }
 
-  /**
-   * 绘制多边形
-   */
-  private drawPolygon(props: any): void {
-    if (!this.ctx || !props.points) return;
-    
-    const points = props.points.split(' ').map((pair: string) => {
-      const [x, y] = pair.split(',').map(Number);
-      return { x, y };
-    });
-    
-    if (points.length < 3) return;
-    
-    this.ctx.beginPath();
-    this.ctx.moveTo(points[0].x, points[0].y);
-    
-    for (let i = 1; i < points.length; i++) {
-      this.ctx.lineTo(points[i].x, points[i].y);
-    }
-    
-    this.ctx.closePath();
-    
-    if (props.fill && props.fill !== 'none') {
-      this.ctx.fillStyle = props.fill;
-      this.ctx.fill();
-    }
-    
-    if (props.stroke && props.stroke !== 'none') {
-      this.ctx.strokeStyle = props.stroke;
-      this.ctx.lineWidth = props.strokeWidth || 1;
-      this.ctx.stroke();
-    }
+  setOffset(offsetX: number, offsetY: number): void {
+    this.offsetX = offsetX;
+    this.offsetY = offsetY;
   }
 
-  /**
-   * 绘制组
-   */
-  private drawGroup(props: any, children?: RenderCommand[]): void {
-    if (!this.ctx || !children) return;
-    
-    this.ctx.save();
-    
-    // 应用组属性
-    if (props.opacity !== undefined) {
-      this.ctx.globalAlpha = props.opacity;
-    }
-    
-    // 渲染子元素
-    for (const child of children) {
-      if (typeof child !== 'string') {
-        this.renderCommand(child);
-      }
-    }
-    
-    this.ctx.restore();
+  zoom(factor: number, centerX: number, centerY: number): void {
+    const worldPoint = this.screenToWorld(centerX, centerY);
+    this.scale *= factor;
+    this.scale = Math.max(1, Math.min(200, this.scale));
+    const newScreenPoint = this.worldToScreen(worldPoint.x, worldPoint.y);
+    this.offsetX += centerX - newScreenPoint.x;
+    this.offsetY += centerY - newScreenPoint.y;
   }
 
-  /**
-   * 绘制网格
-   */
-  private drawGrid(): void {
-    if (!this.ctx) return;
-    
-    const bounds = this.coordSystem.getVisibleWorldBounds();
-    const gridSize = this.coordSystem.getGridSize();
-    
-    this.ctx.strokeStyle = '#e0e0e0';
-    this.ctx.lineWidth = 1;
-    this.ctx.setLineDash([]);
-    
-    // 垂直线
-    const startX = Math.floor(bounds.minX / gridSize) * gridSize;
-    for (let x = startX; x <= bounds.maxX; x += gridSize) {
-      const screenX = this.coordSystem.worldToScreenX(x);
-      this.ctx.beginPath();
-      this.ctx.moveTo(screenX, 0);
-      this.ctx.lineTo(screenX, this.coordSystem.getViewHeight());
-      this.ctx.stroke();
-    }
-    
-    // 水平线
-    const startY = Math.floor(bounds.minY / gridSize) * gridSize;
-    for (let y = startY; y <= bounds.maxY; y += gridSize) {
-      const screenY = this.coordSystem.worldToScreenY(y);
-      this.ctx.beginPath();
-      this.ctx.moveTo(0, screenY);
-      this.ctx.lineTo(this.coordSystem.getViewWidth(), screenY);
-      this.ctx.stroke();
-    }
+  destroy(): void {
+    this.canvas = null;
+    this.ctx = null;
   }
 
-  /**
-   * 绘制坐标轴
-   */
-  private drawAxes(): void {
-    if (!this.ctx) return;
-    
-    const width = this.coordSystem.getViewWidth();
-    const height = this.coordSystem.getViewHeight();
-    const originX = this.coordSystem.worldToScreenX(0);
-    const originY = this.coordSystem.worldToScreenY(0);
-    
-    this.ctx.strokeStyle = '#000000';
-    this.ctx.lineWidth = 2;
-    this.ctx.setLineDash([]);
-    
-    // X 轴
-    this.ctx.beginPath();
-    this.ctx.moveTo(0, originY);
-    this.ctx.lineTo(width, originY);
-    this.ctx.stroke();
-    
-    // Y 轴
-    this.ctx.beginPath();
-    this.ctx.moveTo(originX, 0);
-    this.ctx.lineTo(originX, height);
-    this.ctx.stroke();
-    
-    // 绘制箭头
-    this.drawArrowHead(width - 10, originY, 0);
-    this.drawArrowHead(originX, 10, -Math.PI / 2);
-    
-    // 标签
-    this.ctx.fillStyle = '#000000';
-    this.ctx.font = '14px Arial';
-    this.ctx.fillText('x', width - 20, originY - 10);
-    this.ctx.fillText('y', originX + 10, 20);
-  }
-
-  /**
-   * 绘制箭头
-   */
-  private drawArrowHead(x: number, y: number, angle: number): void {
-    if (!this.ctx) return;
-    
-    const size = 8;
-    
-    this.ctx.save();
-    this.ctx.translate(x, y);
-    this.ctx.rotate(angle);
-    
-    this.ctx.beginPath();
-    this.ctx.moveTo(0, 0);
-    this.ctx.lineTo(-size, -size / 2);
-    this.ctx.lineTo(-size, size / 2);
-    this.ctx.closePath();
-    this.ctx.fill();
-    
-    this.ctx.restore();
-  }
-
-  /**
-   * 设置坐标系统
-   */
-  setCoordinateSystem(coordSystem: CoordinateSystem): void {
-    this.coordSystem = coordSystem;
-  }
-
-  /**
-   * 获取渲染上下文
-   */
   getContext(): CanvasRenderingContext2D | null {
     return this.ctx;
   }
 
-  /**
-   * 获取 Canvas 元素
-   */
   getCanvas(): HTMLCanvasElement | null {
     return this.canvas;
+  }
+
+  getScale(): number {
+    return this.scale;
+  }
+
+  getOffset(): { x: number; y: number } {
+    return { x: this.offsetX, y: this.offsetY };
   }
 }

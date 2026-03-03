@@ -1,4 +1,4 @@
-import { GeoElement, AlgoElement, Construction as ConstructionInterface } from '../types';
+import { AlgoElement, Construction as ConstructionInterface } from '../../types';
 import { AlgorithmSetImpl } from './AlgorithmSet';
 import { Kernel } from './Kernel';
 
@@ -162,7 +162,7 @@ export class Construction implements ConstructionInterface {
   private ceList: any[] = []; // 所有构造元素
   private algoList: AlgoElement[] = []; // 算法列表
   private algoSetCurrentlyUpdated: AlgorithmSetImpl = new AlgorithmSetImpl();
-  private geoTable: Map<string, GeoElement> = new Map(); // 几何对象表（按标签索引）
+  private geoTable: Map<string, any> = new Map(); // 几何对象表（按标签索引）
   private kernel: Kernel;
   private labelGenerator: LabelGenerator = new LabelGenerator();
 
@@ -210,7 +210,7 @@ export class Construction implements ConstructionInterface {
    * @param label 标签
    * @returns 几何对象或 null
    */
-  getGeoElementByLabel(label: string): GeoElement | null {
+  getGeoElementByLabel(label: string): any | null {
     return this.geoTable.get(label) || null;
   }
 
@@ -218,7 +218,7 @@ export class Construction implements ConstructionInterface {
    * 添加几何对象
    * @param geo 几何对象
    */
-  addGeoElement(geo: GeoElement): void {
+  addGeoElement(geo: any): void {
     if (geo.getLabel()) {
       this.geoTable.set(geo.getLabel(), geo);
     }
@@ -229,7 +229,7 @@ export class Construction implements ConstructionInterface {
    * 移除几何对象
    * @param geo 几何对象
    */
-  removeGeoElement(geo: GeoElement): void {
+  removeGeoElement(geo: any): void {
     if (geo.getLabel()) {
       this.geoTable.delete(geo.getLabel());
     }
@@ -318,7 +318,7 @@ export class Construction implements ConstructionInterface {
    * 获取所有几何对象
    * @returns 几何对象数组
    */
-  getAllGeoElements(): GeoElement[] {
+  getAllGeoElements(): any[] {
     return this.ceList.filter(item => item.getLabel !== undefined);
   }
 

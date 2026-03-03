@@ -1,11 +1,21 @@
 import React from 'react';
 import { useGeoGebra } from '../core/GeoGebraContext';
 import { GeoElement, GeoPointElement, GeoLineElement, GeoSegmentElement, GeoCircleElement, GeoPolygonElement } from '../types';
+import { Trash2, CircleDot, Slash, Minus, Circle, Hexagon, Layers } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 interface ObjectListProps {
   className?: string;
   style?: React.CSSProperties;
 }
+
+const typeIcons: Record<string, React.ReactNode> = {
+  point: <CircleDot size={14} />,
+  line: <Slash size={14} />,
+  segment: <Minus size={14} />,
+  circle: <Circle size={14} />,
+  polygon: <Hexagon size={14} />,
+};
 
 export function ObjectList({ className, style }: ObjectListProps): React.ReactElement {
   const { state, selectElements, deleteElement } = useGeoGebra();
@@ -39,72 +49,66 @@ export function ObjectList({ className, style }: ObjectListProps): React.ReactEl
 
   return (
     <div
-      className={className}
-      style={{
-        width: '250px',
-        border: '1px solid #ddd',
-        borderRadius: '4px',
-        backgroundColor: '#fff',
-        overflow: 'hidden',
-        ...style,
-      }}
+      className={cn(
+        'flex flex-col w-60 bg-white border border-gray-200 rounded-lg overflow-hidden',
+        className
+      )}
+      style={style}
     >
-      <div
-        style={{
-          padding: '10px',
-          borderBottom: '1px solid #ddd',
-          fontWeight: 'bold',
-          backgroundColor: '#f5f5f5',
-        }}
-      >
-        对象列表 ({state.construction.elements.size})
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50">
+        <Layers size={16} className="text-gray-500" />
+        <span className="font-medium text-gray-700">对象列表</span>
+        <span className="ml-auto text-sm text-gray-400">{state.construction.elements.size}</span>
       </div>
-      <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-        {state.construction.elementOrder.map((id) => {
-          const geo = state.construction.elements.get(id);
-          if (!geo) return null;
+      <div className="flex-1 overflow-y-auto max-h-[400px]">
+        {state.construction.elementOrder.length === 0 ? (
+          <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+            暂无对象
+          </div>
+        ) : (
+          state.construction.elementOrder.map((id) => {
+            const geo = state.construction.elements.get(id);
+            if (!geo) return null;
 
-          const isSelected = state.interaction.selectedIds.includes(id);
+            const isSelected = state.interaction.selectedIds.includes(id);
 
-          return (
-            <div
-              key={id}
-              onClick={() => selectElements([id])}
-              style={{
-                padding: '8px 12px',
-                borderBottom: '1px solid #eee',
-                cursor: 'pointer',
-                backgroundColor: isSelected ? '#e6f2ff' : 'transparent',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 'bold', color: geo.style.strokeColor }}>
-                  {geo.label || geo.type}
-                </div>
-                <div style={{ fontSize: '12px', color: '#666' }}>{getElementInfo(geo)}</div>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteElement(id);
-                }}
-                style={{
-                  padding: '2px 6px',
-                  fontSize: '12px',
-                  border: '1px solid #ccc',
-                  borderRadius: '3px',
-                  backgroundColor: '#fff',
-                  cursor: 'pointer',
-                }}
+            return (
+              <div
+                key={id}
+                onClick={() => selectElements([id])}
+                className={cn(
+                  'flex items-center justify-between px-4 py-2 border-b border-gray-100 cursor-pointer transition-colors',
+                  'hover:bg-gray-50',
+                  isSelected && 'bg-blue-50 border-l-2 border-l-blue-500'
+                )}
               >
-                删除
-              </button>
-            </div>
-          );
-        })}
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <span style={{ color: geo.style.strokeColor }}>
+                    {typeIcons[geo.type] || <CircleDot size={14} />}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="font-medium text-sm truncate" style={{ color: geo.style.strokeColor }}>
+                      {geo.label || geo.type}
+                    </div>
+                    <div className="text-xs text-gray-400 truncate">{getElementInfo(geo)}</div>
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteElement(id);
+                  }}
+                  className={cn(
+                    'p-1.5 rounded-md transition-colors',
+                    'hover:bg-gray-100 text-gray-400 hover:text-red-500'
+                  )}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

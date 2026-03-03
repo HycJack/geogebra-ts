@@ -1,15 +1,16 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './styles/globals.css';
 import { GeoGebra, GeoGebraProvider } from './index.tsx';
-import { AdvancedExample } from './examples/AdvancedExample';
 
 function DemoApp(): React.ReactElement {
   return (
-    <div>
-      <h1>React GeoGebra 几何绘图演示</h1>
-      <GeoGebraProvider>
-        <AdvancedExample />
-        <div className="demo-container">
+    <div className="min-h-screen bg-gray-100 p-6">
+      <div className="max-w-7xl mx-auto">
+        <h1 className="text-2xl font-bold text-gray-800 mb-6 text-center">
+          React GeoGebra 几何绘图
+        </h1>
+        <GeoGebraProvider>
           <GeoGebra
             width={900}
             height={600}
@@ -19,8 +20,8 @@ function DemoApp(): React.ReactElement {
             showObjectList={true}
             showPropertiesPanel={true}
           />
-        </div>
-      </GeoGebraProvider>
+        </GeoGebraProvider>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { GeoElement, AlgoElement as AlgoElementInterface } from '../types';
+import { CoreGeoElement, AlgoElement as AlgoElementInterface } from '../../types';
 import { Construction } from './Construction';
 
 /**
@@ -6,8 +6,8 @@ import { Construction } from './Construction';
  * 管理输入输出对象，实现更新逻辑
  */
 export abstract class AlgoElement implements AlgoElementInterface {
-  protected input: GeoElement[] = [];
-  protected output: GeoElement[] = [];
+  protected input: CoreGeoElement[] = [];
+  protected output: CoreGeoElement[] = [];
   protected construction: Construction;
   private updateAfterAlgo: AlgoElement | null = null;
   private id: number;
@@ -32,7 +32,7 @@ export abstract class AlgoElement implements AlgoElementInterface {
    * 获取输入对象
    * @returns 输入对象数组
    */
-  getInput(): GeoElement[] {
+  getInput(): CoreGeoElement[] {
     return this.input;
   }
 
@@ -40,7 +40,7 @@ export abstract class AlgoElement implements AlgoElementInterface {
    * 获取输出对象
    * @returns 输出对象数组
    */
-  getOutput(): GeoElement[] {
+  getOutput(): CoreGeoElement[] {
     return this.output;
   }
 
@@ -48,7 +48,7 @@ export abstract class AlgoElement implements AlgoElementInterface {
    * 设置输入对象
    * @param input 输入对象数组
    */
-  protected setInput(input: GeoElement[]): void {
+  protected setInput(input: CoreGeoElement[]): void {
     this.input = input;
     this.constructionIndex = this.calculateConstructionIndex();
   }
@@ -57,7 +57,7 @@ export abstract class AlgoElement implements AlgoElementInterface {
    * 设置输出对象
    * @param output 输出对象数组
    */
-  protected setOutput(output: GeoElement[]): void {
+  protected setOutput(output: CoreGeoElement[]): void {
     this.output = output;
   }
 
@@ -65,7 +65,7 @@ export abstract class AlgoElement implements AlgoElementInterface {
    * 设置单个输出对象
    * @param output 输出对象
    */
-  protected setOnlyOutput(output: GeoElement): void {
+  protected setOnlyOutput(output: CoreGeoElement): void {
     this.output = [output];
   }
 
@@ -145,6 +145,21 @@ export abstract class AlgoElement implements AlgoElementInterface {
       maxIndex = Math.max(maxIndex, inputElement.getConstructionIndex());
     }
     return maxIndex + 1;
+  }
+
+  /**
+   * 清理方法
+   */
+  dispose(): void {
+    // 清理依赖关系
+    for (const inputElement of this.input) {
+      inputElement.removeDependent(this);
+    }
+    
+    // 清理输出对象
+    this.input = [];
+    this.output = [];
+    this.updateAfterAlgo = null;
   }
 }
 

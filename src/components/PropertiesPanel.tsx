@@ -1,5 +1,7 @@
 import React from 'react';
 import { useGeoGebra } from '../core/GeoGebraContext';
+import { Settings, Type, Palette, Paintbrush, Move, Eye, EyeOff, Tag } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 interface PropertiesPanelProps {
   className?: string;
@@ -15,17 +17,14 @@ export function PropertiesPanel({ className, style }: PropertiesPanelProps): Rea
   if (!selectedGeo) {
     return (
       <div
-        className={className}
-        style={{
-          width: '250px',
-          border: '1px solid #ddd',
-          borderRadius: '4px',
-          backgroundColor: '#fff',
-          padding: '10px',
-          ...style,
-        }}
+        className={cn(
+          'flex flex-col items-center justify-center w-60 h-40 bg-white border border-gray-200 rounded-lg text-gray-400',
+          className
+        )}
+        style={style}
       >
-        <div style={{ color: '#666', textAlign: 'center' }}>未选择对象</div>
+        <Settings size={24} className="mb-2 opacity-50" />
+        <span className="text-sm">未选择对象</span>
       </div>
     );
   }
@@ -45,29 +44,22 @@ export function PropertiesPanel({ className, style }: PropertiesPanelProps): Rea
 
   return (
     <div
-      className={className}
-      style={{
-        width: '250px',
-        border: '1px solid #ddd',
-        borderRadius: '4px',
-        backgroundColor: '#fff',
-        overflow: 'hidden',
-        ...style,
-      }}
+      className={cn(
+        'flex flex-col w-60 bg-white border border-gray-200 rounded-lg overflow-hidden',
+        className
+      )}
+      style={style}
     >
-      <div
-        style={{
-          padding: '10px',
-          borderBottom: '1px solid #ddd',
-          fontWeight: 'bold',
-          backgroundColor: '#f5f5f5',
-        }}
-      >
-        属性: {selectedGeo.label || selectedGeo.type}
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50">
+        <Settings size={16} className="text-gray-500" />
+        <span className="font-medium text-gray-700">属性</span>
+        <span className="ml-auto text-sm text-gray-400">{selectedGeo.label || selectedGeo.type}</span>
       </div>
-      <div style={{ padding: '10px' }}>
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>
+      
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <Type size={14} />
             标签
           </label>
           <input
@@ -80,37 +72,69 @@ export function PropertiesPanel({ className, style }: PropertiesPanelProps): Rea
                 updates: { label: e.target.value },
               })
             }
-            style={{ width: '100%', padding: '4px', border: '1px solid #ccc', borderRadius: '3px' }}
+            className={cn(
+              'w-full px-3 py-2 text-sm border border-gray-200 rounded-md',
+              'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent',
+              'transition-all duration-200'
+            )}
           />
         </div>
 
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <Palette size={14} />
             线条颜色
           </label>
-          <input
-            type="color"
-            value={selectedGeo.style.strokeColor}
-            onChange={(e) => handleStyleChange('strokeColor', e.target.value)}
-            style={{ width: '100%', height: '30px' }}
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={selectedGeo.style.strokeColor}
+              onChange={(e) => handleStyleChange('strokeColor', e.target.value)}
+              className="w-10 h-10 rounded-md border border-gray-200 cursor-pointer"
+            />
+            <input
+              type="text"
+              value={selectedGeo.style.strokeColor}
+              onChange={(e) => handleStyleChange('strokeColor', e.target.value)}
+              className={cn(
+                'flex-1 px-3 py-2 text-sm border border-gray-200 rounded-md',
+                'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+              )}
+            />
+          </div>
         </div>
 
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+            <Paintbrush size={14} />
             填充颜色
           </label>
-          <input
-            type="color"
-            value={selectedGeo.style.fillColor}
-            onChange={(e) => handleStyleChange('fillColor', e.target.value)}
-            style={{ width: '100%', height: '30px' }}
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={selectedGeo.style.fillColor}
+              onChange={(e) => handleStyleChange('fillColor', e.target.value)}
+              className="w-10 h-10 rounded-md border border-gray-200 cursor-pointer"
+            />
+            <input
+              type="text"
+              value={selectedGeo.style.fillColor}
+              onChange={(e) => handleStyleChange('fillColor', e.target.value)}
+              className={cn(
+                'flex-1 px-3 py-2 text-sm border border-gray-200 rounded-md',
+                'focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+              )}
+            />
+          </div>
         </div>
 
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>
-            线条宽度: {selectedGeo.style.strokeWidth}
+        <div>
+          <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-2">
+            <span className="flex items-center gap-2">
+              <Move size={14} />
+              线条宽度
+            </span>
+            <span className="text-gray-400">{selectedGeo.style.strokeWidth}px</span>
           </label>
           <input
             type="range"
@@ -118,13 +142,17 @@ export function PropertiesPanel({ className, style }: PropertiesPanelProps): Rea
             max="10"
             value={selectedGeo.style.strokeWidth}
             onChange={(e) => handleStyleChange('strokeWidth', parseInt(e.target.value))}
-            style={{ width: '100%' }}
+            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
           />
         </div>
 
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', marginBottom: '4px', fontWeight: 'bold' }}>
-            透明度: {(selectedGeo.style.opacity * 100).toFixed(0)}%
+        <div>
+          <label className="flex items-center justify-between text-sm font-medium text-gray-700 mb-2">
+            <span className="flex items-center gap-2">
+              <Eye size={14} />
+              透明度
+            </span>
+            <span className="text-gray-400">{(selectedGeo.style.opacity * 100).toFixed(0)}%</span>
           </label>
           <input
             type="range"
@@ -133,29 +161,35 @@ export function PropertiesPanel({ className, style }: PropertiesPanelProps): Rea
             step="0.1"
             value={selectedGeo.style.opacity}
             onChange={(e) => handleStyleChange('opacity', parseFloat(e.target.value))}
-            style={{ width: '100%' }}
+            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
           />
         </div>
 
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div className="pt-2 space-y-2">
+          <label className="flex items-center gap-3 cursor-pointer">
             <input
               type="checkbox"
               checked={selectedGeo.style.visible}
               onChange={(e) => handleStyleChange('visible', e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500"
             />
-            显示对象
+            <span className="flex items-center gap-2 text-sm text-gray-700">
+              {selectedGeo.style.visible ? <Eye size={14} /> : <EyeOff size={14} />}
+              显示对象
+            </span>
           </label>
-        </div>
 
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label className="flex items-center gap-3 cursor-pointer">
             <input
               type="checkbox"
               checked={selectedGeo.style.labelVisible}
               onChange={(e) => handleStyleChange('labelVisible', e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-blue-500 focus:ring-blue-500"
             />
-            显示标签
+            <span className="flex items-center gap-2 text-sm text-gray-700">
+              <Tag size={14} />
+              显示标签
+            </span>
           </label>
         </div>
       </div>

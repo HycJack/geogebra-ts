@@ -18,6 +18,7 @@ import { generateId } from '../utils/coordinates';
 import { CoordinateSystem } from '../common/coordinates/CoordinateSystem';
 import { Kernel, Construction } from '../common';
 import { GeoPoint, GeoLine, GeoSegment, GeoCircle, GeoPolygon, GeoVector } from '../common/types/GeoElements';
+import { findIntersections } from '../common/geometry/intersection';
 
 interface ConstructionState {
   elements: Map<string, GeoElement>;
@@ -25,13 +26,19 @@ interface ConstructionState {
   algorithms: Map<string, Algorithm>;
   kernel: Kernel | null;
   construction: Construction | null;
-  coreElements: Map<string, any>; // 存储核心几何对象
+  coreElements: Map<string, any>;
+}
+
+interface HistoryState {
+  past: ConstructionState[];
+  future: ConstructionState[];
 }
 
 interface GeoGebraState {
   construction: ConstructionState;
   view: ViewState;
   interaction: InteractionState;
+  history: HistoryState;
 }
 
 type GeoGebraAction =
@@ -48,6 +55,9 @@ type GeoGebraAction =
   | { type: 'UPDATE_POINT'; id: string; x: number; y: number }
   | { type: 'ADD_ALGORITHM'; algorithm: Algorithm }
   | { type: 'UPDATE_CONSTRUCTION'; kernel?: Kernel; construction?: Construction }
+  | { type: 'UNDO' }
+  | { type: 'REDO' }
+  | { type: 'SAVE_HISTORY' }
 
 const defaultStyle: GeoElementStyle = {
   strokeColor: '#000000',
@@ -85,6 +95,10 @@ const initialState: GeoGebraState = {
     isDragging: false,
     dragStartPoint: null,
     previewElements: [],
+  },
+  history: {
+    past: [],
+    future: [],
   },
 };
 
@@ -210,6 +224,28 @@ function geoGebraReducer(state: GeoGebraState, action: GeoGebraAction): GeoGebra
       const existing = newElements.get(action.id) as GeoPointElement | undefined;
       if (existing && existing.type === 'point') {
         newElements.set(action.id, { ...existing, x: action.x, y: action.y });
+        
+        for (const [elemId, elem] of newElements) {
+          if (elem.parentIds && elem.parentIds.includes(action.id)) {
+            if (elem.type === 'segment') {
+              const segment = elem as GeoSegmentElement;
+              const start = newElements.get(segment.startPointId) as GeoPointElement;
+              const end = newElements.get(segment.endPointId) as GeoPointElement;
+              if (start && end) {
+                newElements.set(elemId, { ...segment });
+              }
+            } else if (elem.type === 'circle') {
+              const circle = elem as GeoCircleElement;
+              newElements.set(elemId, { ...circle });
+            } else if (elem.type === 'polygon') {
+              const polygon = elem as GeoPolygonElement;
+              newElements.set(elemId, { ...polygon });
+            } else if (elem.type === 'vector') {
+              const vector = elem as GeoVectorElement;
+              newElements.set(elemId, { ...vector });
+            }
+          }
+        }
       }
       return {
         ...state,
@@ -243,6 +279,59 @@ function geoGebraReducer(state: GeoGebraState, action: GeoGebraAction): GeoGebra
       };
     }
 
+    case 'SAVE_HISTORY': {
+      const newPast = [...state.history.past, state.construction].slice(-50);
+      return {
+        ...state,
+        history: {
+          past: newPast,
+          future: [],
+        },
+      };
+    }
+
+    case 'UNDO': {
+      if (state.history.past.length === 0) return state;
+      
+      const previous = state.history.past[state.history.past.length - 1];
+      const newPast = state.history.past.slice(0, -1);
+      
+      return {
+        ...state,
+        construction: previous,
+        history: {
+          past: newPast,
+          future: [state.construction, ...state.history.future],
+        },
+        interaction: {
+          ...state.interaction,
+          selectedIds: [],
+          hoveredId: null,
+        },
+      };
+    }
+
+    case 'REDO': {
+      if (state.history.future.length === 0) return state;
+      
+      const next = state.history.future[0];
+      const newFuture = state.history.future.slice(1);
+      
+      return {
+        ...state,
+        construction: next,
+        history: {
+          past: [...state.history.past, state.construction],
+          future: newFuture,
+        },
+        interaction: {
+          ...state.interaction,
+          selectedIds: [],
+          hoveredId: null,
+        },
+      };
+    }
+
     default:
       return state;
   }
@@ -270,6 +359,10 @@ interface GeoGebraContextValue {
   endDrag: () => void;
   setPreview: (elements: GeoElement[]) => void;
   updateConstruction: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 const GeoGebraContext = createContext<GeoGebraContextValue | null>(null);
@@ -324,12 +417,74 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
     [state.construction.elements]
   );
 
+  const createIntersectionPoints = useCallback(
+    (newElement: GeoElement) => {
+      const supportedTypes = ['line', 'segment', 'ray', 'circle', 'polygon'];
+      
+      if (!supportedTypes.includes(newElement.type)) {
+        return;
+      }
+      
+      setTimeout(() => {
+        const currentElements = new Map(state.construction.elements);
+        if (!currentElements.has(newElement.id)) {
+          currentElements.set(newElement.id, newElement);
+        }
+        
+        const getElement = (id: string) => currentElements.get(id);
+        
+        for (const [id, existingElement] of currentElements) {
+          if (id === newElement.id) continue;
+          
+          if (supportedTypes.includes(existingElement.type)) {
+            const intersections = findIntersections(newElement, existingElement, getElement);
+            
+            for (const point of intersections) {
+              const existingPoints = Array.from(currentElements.values())
+                .filter(el => el.type === 'point') as GeoPointElement[];
+              
+              const threshold = 0.01;
+              const alreadyExists = existingPoints.some(
+                p => Math.abs(p.x - point.x) < threshold && Math.abs(p.y - point.y) < threshold
+              );
+              
+              if (!alreadyExists) {
+                const intersectionPoint: GeoPointElement = {
+                  id: generateId(),
+                  type: 'point',
+                  label: `I${currentElements.size + 1}`,
+                  x: point.x,
+                  y: point.y,
+                  pointSize: 5,
+                  pointStyle: 'dot',
+                  style: { 
+                    strokeColor: '#000000',
+                    fillColor: '#ef4444',
+                    strokeWidth: 2,
+                    opacity: 1,
+                    visible: true,
+                    labelVisible: true,
+                  },
+                  isIndependent: false,
+                  parentIds: [newElement.id, existingElement.id],
+                };
+                
+                dispatch({ type: 'ADD_ELEMENT', element: intersectionPoint });
+                currentElements.set(intersectionPoint.id, intersectionPoint);
+              }
+            }
+          }
+        }
+      }, 50);
+    },
+    [state.construction.elements]
+  );
+
   const addPoint = useCallback(
     (x: number, y: number, label?: string, style?: Partial<GeoElementStyle>): GeoPointElement => {
       const id = generateId();
       let pointLabel: string;
       
-      // 创建核心几何对象
       if (state.construction.construction) {
         const corePoint = new GeoPoint(state.construction.construction, x, y);
         if (label) {
@@ -354,6 +509,7 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         parentIds: [],
       };
       
+      dispatch({ type: 'SAVE_HISTORY' });
       dispatch({ type: 'ADD_ELEMENT', element });
       return element;
     },
@@ -374,7 +530,6 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         parentIds: [],
       };
       
-      // 创建核心几何对象
       if (state.construction.construction) {
         const coreLine = new GeoLine(state.construction.construction, a, b, c);
         coreLine.setLabel(element.label);
@@ -382,10 +537,12 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         state.construction.construction.addGeoElement(coreLine);
       }
       
+      dispatch({ type: 'SAVE_HISTORY' });
       dispatch({ type: 'ADD_ELEMENT', element });
+      createIntersectionPoints(element);
       return element;
     },
-    [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
+    [state.construction.elements.size, state.construction.construction, state.construction.coreElements, createIntersectionPoints]
   );
 
   const addLineFromPoints = useCallback(
@@ -411,7 +568,6 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         parentIds: [startPointId, endPointId],
       };
       
-      // 创建核心几何对象
       if (state.construction.construction) {
         const startPoint = state.construction.coreElements.get(startPointId);
         const endPoint = state.construction.coreElements.get(endPointId);
@@ -423,10 +579,12 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         }
       }
       
+      dispatch({ type: 'SAVE_HISTORY' });
       dispatch({ type: 'ADD_ELEMENT', element });
+      createIntersectionPoints(element);
       return element;
     },
-    [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
+    [state.construction.elements.size, state.construction.construction, state.construction.coreElements, createIntersectionPoints]
   );
 
   const addCircle = useCallback(
@@ -442,7 +600,6 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         parentIds: [centerId],
       };
       
-      // 创建核心几何对象
       if (state.construction.construction) {
         const center = state.construction.coreElements.get(centerId);
         if (center) {
@@ -453,10 +610,12 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         }
       }
       
+      dispatch({ type: 'SAVE_HISTORY' });
       dispatch({ type: 'ADD_ELEMENT', element });
+      createIntersectionPoints(element);
       return element;
     },
-    [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
+    [state.construction.elements.size, state.construction.construction, state.construction.coreElements, createIntersectionPoints]
   );
 
   const addPolygon = useCallback(
@@ -471,7 +630,31 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         parentIds: pointIds,
       };
       
-      // 创建核心几何对象
+      dispatch({ type: 'SAVE_HISTORY' });
+      dispatch({ type: 'ADD_ELEMENT', element });
+      
+      const segments: GeoSegmentElement[] = [];
+      for (let i = 0; i < pointIds.length; i++) {
+        const startPointId = pointIds[i];
+        const endPointId = pointIds[(i + 1) % pointIds.length];
+        
+        const segment: GeoSegmentElement = {
+          id: generateId(),
+          type: 'segment',
+          label: pointIds.length === 3 
+            ? ['c', 'a', 'b'][i] || `s${i + 1}`
+            : `s${i + 1}`,
+          startPointId,
+          endPointId,
+          style: { ...defaultStyle, ...style },
+          isIndependent: false,
+          parentIds: [element.id, startPointId, endPointId],
+        };
+        
+        segments.push(segment);
+        dispatch({ type: 'ADD_ELEMENT', element: segment });
+      }
+      
       if (state.construction.construction) {
         const points = pointIds.map(id => state.construction.coreElements.get(id)).filter(Boolean);
         if (points.length === pointIds.length) {
@@ -479,13 +662,24 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
           corePolygon.setLabel(element.label);
           state.construction.coreElements.set(element.id, corePolygon);
           state.construction.construction.addGeoElement(corePolygon);
+          
+          for (const segment of segments) {
+            const start = state.construction.coreElements.get(segment.startPointId);
+            const end = state.construction.coreElements.get(segment.endPointId);
+            if (start && end) {
+              const coreSegment = new GeoSegment(state.construction.construction, start, end);
+              coreSegment.setLabel(segment.label);
+              state.construction.coreElements.set(segment.id, coreSegment);
+              state.construction.construction.addGeoElement(coreSegment);
+            }
+          }
         }
       }
       
-      dispatch({ type: 'ADD_ELEMENT', element });
+      createIntersectionPoints(element);
       return element;
     },
-    [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
+    [state.construction.elements.size, state.construction.construction, state.construction.coreElements, createIntersectionPoints]
   );
 
   const addVector = useCallback(
@@ -501,7 +695,6 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         parentIds: [startPointId, endPointId],
       };
       
-      // 创建核心几何对象
       if (state.construction.construction) {
         const startPoint = state.construction.coreElements.get(startPointId);
         const endPoint = state.construction.coreElements.get(endPointId);
@@ -514,6 +707,7 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         }
       }
       
+      dispatch({ type: 'SAVE_HISTORY' });
       dispatch({ type: 'ADD_ELEMENT', element });
       return element;
     },
@@ -534,8 +728,7 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         parentIds: [],
       };
       
-      // 文本对象暂时不创建核心几何对象
-      
+      dispatch({ type: 'SAVE_HISTORY' });
       dispatch({ type: 'ADD_ELEMENT', element });
       return element;
     },
@@ -543,9 +736,9 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
   );
 
   const updatePointPosition = useCallback((id: string, x: number, y: number) => {
+    dispatch({ type: 'SAVE_HISTORY' });
     dispatch({ type: 'UPDATE_POINT', id, x, y });
     
-    // 更新核心几何对象
     const corePoint = state.construction.coreElements.get(id);
     if (corePoint && typeof corePoint.setCoords === 'function') {
       corePoint.setCoords(x, y);
@@ -553,9 +746,9 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
   }, [state.construction.coreElements]);
 
   const deleteElement = useCallback((id: string) => {
+    dispatch({ type: 'SAVE_HISTORY' });
     dispatch({ type: 'DELETE_ELEMENT', id });
     
-    // 删除核心几何对象
     state.construction.coreElements.delete(id);
   }, [state.construction.coreElements]);
 
@@ -587,6 +780,17 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
     dispatch({ type: 'UPDATE_CONSTRUCTION' });
   }, []);
 
+  const undo = useCallback(() => {
+    dispatch({ type: 'UNDO' });
+  }, []);
+
+  const redo = useCallback(() => {
+    dispatch({ type: 'REDO' });
+  }, []);
+
+  const canUndo = state.history.past.length > 0;
+  const canRedo = state.history.future.length > 0;
+
   const value: GeoGebraContextValue = {
     state,
     dispatch,
@@ -609,6 +813,10 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
     endDrag,
     setPreview,
     updateConstruction,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   };
 
   return <GeoGebraContext.Provider value={value}>{children}</GeoGebraContext.Provider>;
