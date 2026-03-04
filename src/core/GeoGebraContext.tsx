@@ -15,10 +15,10 @@ import {
   Algorithm,
 } from '../types';
 import { generateId } from '../utils/coordinates';
-import { CoordinateSystem } from '../common/coordinates/CoordinateSystem';
-import { Kernel, Construction } from '../common';
-import { GeoPoint, GeoLine, GeoSegment, GeoCircle, GeoPolygon, GeoVector } from '../common/types/GeoElements';
-import { findIntersections } from '../common/geometry/intersection';
+import { CoordinateSystem } from '../euclidian/coordinates/CoordinateSystem';
+import { Kernel, Construction, GeoPoint, GeoLine, GeoSegment, GeoCircle, GeoPolygon, GeoVector } from '../kernel';
+import { exportToJSON, importFromJSON } from '../utils/importExport';
+import { AlgoJoinPointsSegment, AlgoJoinPointsLine } from '../kernel/algos/AlgoJoinPoints';
 
 interface ConstructionState {
   elements: Map<string, GeoElement>;
@@ -58,6 +58,8 @@ type GeoGebraAction =
   | { type: 'UNDO' }
   | { type: 'REDO' }
   | { type: 'SAVE_HISTORY' }
+  | { type: 'IMPORT_DATA'; elements: GeoElement[]; view?: Partial<ViewState> }
+  | { type: 'CLEAR_ALL' }
 
 const defaultStyle: GeoElementStyle = {
   strokeColor: '#000000',
@@ -229,10 +231,36 @@ function geoGebraReducer(state: GeoGebraState, action: GeoGebraAction): GeoGebra
           if (elem.parentIds && elem.parentIds.includes(action.id)) {
             if (elem.type === 'segment') {
               const segment = elem as GeoSegmentElement;
-              const start = newElements.get(segment.startPointId) as GeoPointElement;
-              const end = newElements.get(segment.endPointId) as GeoPointElement;
-              if (start && end) {
-                newElements.set(elemId, { ...segment });
+              const coreSegment = state.construction.coreElements.get(elemId);
+              if (coreSegment && typeof coreSegment.getA === 'function') {
+                newElements.set(elemId, { 
+                  ...segment, 
+                  a: coreSegment.getA(),
+                  b: coreSegment.getB(),
+                  c: coreSegment.getC()
+                });
+              }
+            } else if (elem.type === 'line') {
+              const line = elem as GeoLineElement;
+              const coreLine = state.construction.coreElements.get(elemId);
+              if (coreLine && typeof coreLine.getA === 'function') {
+                newElements.set(elemId, { 
+                  ...line, 
+                  a: coreLine.getA(),
+                  b: coreLine.getB(),
+                  c: coreLine.getC()
+                });
+              }
+            } else if (elem.type === 'ray') {
+              const ray = elem as any;
+              const coreRay = state.construction.coreElements.get(elemId);
+              if (coreRay && typeof coreRay.getA === 'function') {
+                newElements.set(elemId, { 
+                  ...ray, 
+                  a: coreRay.getA(),
+                  b: coreRay.getB(),
+                  c: coreRay.getC()
+                });
               }
             } else if (elem.type === 'circle') {
               const circle = elem as GeoCircleElement;
@@ -332,6 +360,58 @@ function geoGebraReducer(state: GeoGebraState, action: GeoGebraAction): GeoGebra
       };
     }
 
+    case 'IMPORT_DATA': {
+      const newElements = new Map(state.construction.elements);
+      const newOrder = [...state.construction.elementOrder];
+      
+      for (const element of action.elements) {
+        if (!newElements.has(element.id)) {
+          newElements.set(element.id, element);
+          newOrder.push(element.id);
+        }
+      }
+      
+      return {
+        ...state,
+        construction: {
+          ...state.construction,
+          elements: newElements,
+          elementOrder: newOrder,
+        },
+        view: action.view ? { ...state.view, ...action.view } : state.view,
+        interaction: {
+          ...state.interaction,
+          selectedIds: [],
+          hoveredId: null,
+          previewElements: [],
+        },
+      };
+    }
+
+    case 'CLEAR_ALL': {
+      return {
+        ...state,
+        construction: {
+          elements: new Map(),
+          elementOrder: [],
+          algorithms: new Map(),
+          kernel: state.construction.kernel,
+          construction: state.construction.construction,
+          coreElements: new Map(),
+        },
+        interaction: {
+          ...state.interaction,
+          selectedIds: [],
+          hoveredId: null,
+          previewElements: [],
+        },
+        history: {
+          past: [],
+          future: [],
+        },
+      };
+    }
+
     default:
       return state;
   }
@@ -343,8 +423,10 @@ interface GeoGebraContextValue {
   coordSystem: CoordinateSystem;
   getGeoElement: (id: string) => GeoElement | undefined;
   addPoint: (x: number, y: number, label?: string, style?: Partial<GeoElementStyle>) => GeoPointElement;
+  addIntersectionPoint: (x: number, y: number, parentIds: string[]) => GeoPointElement;
   addLine: (a: number, b: number, c: number, label?: string, style?: Partial<GeoElementStyle>) => GeoLineElement;
   addLineFromPoints: (x1: number, y1: number, x2: number, y2: number, label?: string, style?: Partial<GeoElementStyle>) => GeoLineElement;
+  addLineFromPointIds: (point1Id: string, point2Id: string, label?: string, style?: Partial<GeoElementStyle>) => GeoLineElement;
   addSegment: (startPointId: string, endPointId: string, label?: string, style?: Partial<GeoElementStyle>) => GeoSegmentElement;
   addCircle: (centerId: string, radius: number, label?: string, style?: Partial<GeoElementStyle>) => GeoCircleElement;
   addPolygon: (pointIds: string[], label?: string, style?: Partial<GeoElementStyle>) => GeoPolygonElement;
@@ -363,6 +445,9 @@ interface GeoGebraContextValue {
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  exportData: () => string;
+  importData: (jsonString: string) => void;
+  clearAll: () => void;
 }
 
 const GeoGebraContext = createContext<GeoGebraContextValue | null>(null);
@@ -417,69 +502,6 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
     [state.construction.elements]
   );
 
-  const createIntersectionPoints = useCallback(
-    (newElement: GeoElement) => {
-      const supportedTypes = ['line', 'segment', 'ray', 'circle', 'polygon'];
-      
-      if (!supportedTypes.includes(newElement.type)) {
-        return;
-      }
-      
-      setTimeout(() => {
-        const currentElements = new Map(state.construction.elements);
-        if (!currentElements.has(newElement.id)) {
-          currentElements.set(newElement.id, newElement);
-        }
-        
-        const getElement = (id: string) => currentElements.get(id);
-        
-        for (const [id, existingElement] of currentElements) {
-          if (id === newElement.id) continue;
-          
-          if (supportedTypes.includes(existingElement.type)) {
-            const intersections = findIntersections(newElement, existingElement, getElement);
-            
-            for (const point of intersections) {
-              const existingPoints = Array.from(currentElements.values())
-                .filter(el => el.type === 'point') as GeoPointElement[];
-              
-              const threshold = 0.01;
-              const alreadyExists = existingPoints.some(
-                p => Math.abs(p.x - point.x) < threshold && Math.abs(p.y - point.y) < threshold
-              );
-              
-              if (!alreadyExists) {
-                const intersectionPoint: GeoPointElement = {
-                  id: generateId(),
-                  type: 'point',
-                  label: `I${currentElements.size + 1}`,
-                  x: point.x,
-                  y: point.y,
-                  pointSize: 5,
-                  pointStyle: 'dot',
-                  style: { 
-                    strokeColor: '#000000',
-                    fillColor: '#ef4444',
-                    strokeWidth: 2,
-                    opacity: 1,
-                    visible: true,
-                    labelVisible: true,
-                  },
-                  isIndependent: false,
-                  parentIds: [newElement.id, existingElement.id],
-                };
-                
-                dispatch({ type: 'ADD_ELEMENT', element: intersectionPoint });
-                currentElements.set(intersectionPoint.id, intersectionPoint);
-              }
-            }
-          }
-        }
-      }, 50);
-    },
-    [state.construction.elements]
-  );
-
   const addPoint = useCallback(
     (x: number, y: number, label?: string, style?: Partial<GeoElementStyle>): GeoPointElement => {
       const id = generateId();
@@ -516,6 +538,44 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
     [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
   );
 
+  const addIntersectionPoint = useCallback(
+    (x: number, y: number, parentIds: string[]): GeoPointElement => {
+      const id = generateId();
+      const pointLabel = `I${state.construction.elements.size + 1}`;
+      
+      if (state.construction.construction) {
+        const corePoint = new GeoPoint(state.construction.construction, x, y);
+        corePoint.setLabel(pointLabel);
+        state.construction.coreElements.set(id, corePoint);
+      }
+      
+      const element: GeoPointElement = {
+        id,
+        type: 'point',
+        label: pointLabel,
+        x,
+        y,
+        pointSize: 5,
+        pointStyle: 'dot',
+        style: {
+          strokeColor: '#666666',
+          fillColor: '#999999',
+          strokeWidth: 2,
+          opacity: 1,
+          visible: true,
+          labelVisible: true,
+        },
+        isIndependent: false,
+        parentIds,
+      };
+      
+      dispatch({ type: 'SAVE_HISTORY' });
+      dispatch({ type: 'ADD_ELEMENT', element });
+      return element;
+    },
+    [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
+  );
+
   const addLine = useCallback(
     (a: number, b: number, c: number, label?: string, style?: Partial<GeoElementStyle>): GeoLineElement => {
       const element: GeoLineElement = {
@@ -539,10 +599,9 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
       
       dispatch({ type: 'SAVE_HISTORY' });
       dispatch({ type: 'ADD_ELEMENT', element });
-      createIntersectionPoints(element);
       return element;
     },
-    [state.construction.elements.size, state.construction.construction, state.construction.coreElements, createIntersectionPoints]
+    [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
   );
 
   const addLineFromPoints = useCallback(
@@ -555,14 +614,70 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
     [addLine]
   );
 
+  const addLineFromPointIds = useCallback(
+    (point1Id: string, point2Id: string, label?: string, style?: Partial<GeoElementStyle>): GeoLineElement => {
+      const element: GeoLineElement = {
+        id: generateId(),
+        type: 'line',
+        label: label || `l${state.construction.elements.size + 1}`,
+        a: 0,
+        b: 0,
+        c: 0,
+        style: { ...defaultStyle, ...style },
+        isIndependent: false,
+        parentIds: [point1Id, point2Id],
+      };
+      
+      if (state.construction.construction) {
+        const point1 = state.construction.coreElements.get(point1Id);
+        const point2 = state.construction.coreElements.get(point2Id);
+        if (point1 && point2) {
+          const coreLine = new GeoLine(state.construction.construction);
+          coreLine.setLabel(element.label);
+          
+          new AlgoJoinPointsLine(
+            state.construction.construction,
+            point1 as any,
+            point2 as any,
+            coreLine as any
+          );
+          
+          state.construction.coreElements.set(element.id, coreLine);
+          state.construction.construction.addGeoElement(coreLine);
+          
+          element.a = coreLine.getA();
+          element.b = coreLine.getB();
+          element.c = coreLine.getC();
+        }
+      }
+      
+      dispatch({ type: 'SAVE_HISTORY' });
+      dispatch({ type: 'ADD_ELEMENT', element });
+      return element;
+    },
+    [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
+  );
+
   const addSegment = useCallback(
     (startPointId: string, endPointId: string, label?: string, style?: Partial<GeoElementStyle>): GeoSegmentElement => {
+      let a = 0, b = 0, c = 0;
+      const startPoint = state.construction.elements.get(startPointId);
+      const endPoint = state.construction.elements.get(endPointId);
+      if (startPoint && startPoint.type === 'point' && endPoint && endPoint.type === 'point') {
+        const x1 = startPoint.x, y1 = startPoint.y;
+        const x2 = endPoint.x, y2 = endPoint.y;
+        a = y1 - y2;
+        b = x2 - x1;
+        c = x1 * y2 - x2 * y1;
+      }
+      
       const element: GeoSegmentElement = {
         id: generateId(),
         type: 'segment',
         label: label || `s${state.construction.elements.size + 1}`,
         startPointId,
         endPointId,
+        a, b, c,
         style: { ...defaultStyle, ...style },
         isIndependent: false,
         parentIds: [startPointId, endPointId],
@@ -572,8 +687,16 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         const startPoint = state.construction.coreElements.get(startPointId);
         const endPoint = state.construction.coreElements.get(endPointId);
         if (startPoint && endPoint) {
-          const coreSegment = new GeoSegment(state.construction.construction, startPoint, endPoint);
+          const coreSegment = new GeoSegment(state.construction.construction, startPoint as any, endPoint as any);
           coreSegment.setLabel(element.label);
+          
+          new AlgoJoinPointsSegment(
+            state.construction.construction,
+            startPoint as any,
+            endPoint as any,
+            coreSegment as any
+          );
+          
           state.construction.coreElements.set(element.id, coreSegment);
           state.construction.construction.addGeoElement(coreSegment);
         }
@@ -581,10 +704,9 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
       
       dispatch({ type: 'SAVE_HISTORY' });
       dispatch({ type: 'ADD_ELEMENT', element });
-      createIntersectionPoints(element);
       return element;
     },
-    [state.construction.elements.size, state.construction.construction, state.construction.coreElements, createIntersectionPoints]
+    [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
   );
 
   const addCircle = useCallback(
@@ -612,10 +734,9 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
       
       dispatch({ type: 'SAVE_HISTORY' });
       dispatch({ type: 'ADD_ELEMENT', element });
-      createIntersectionPoints(element);
       return element;
     },
-    [state.construction.elements.size, state.construction.construction, state.construction.coreElements, createIntersectionPoints]
+    [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
   );
 
   const addPolygon = useCallback(
@@ -625,6 +746,7 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         type: 'polygon',
         label: label || `poly${state.construction.elements.size + 1}`,
         pointIds,
+        vertexCount: pointIds.length,
         style: { ...defaultStyle, fillColor: '#3366ff', ...style },
         isIndependent: false,
         parentIds: pointIds,
@@ -638,6 +760,17 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         const startPointId = pointIds[i];
         const endPointId = pointIds[(i + 1) % pointIds.length];
         
+        let a = 0, b = 0, c = 0;
+        const startPoint = state.construction.elements.get(startPointId);
+        const endPoint = state.construction.elements.get(endPointId);
+        if (startPoint && startPoint.type === 'point' && endPoint && endPoint.type === 'point') {
+          const x1 = startPoint.x, y1 = startPoint.y;
+          const x2 = endPoint.x, y2 = endPoint.y;
+          a = y1 - y2;
+          b = x2 - x1;
+          c = x1 * y2 - x2 * y1;
+        }
+        
         const segment: GeoSegmentElement = {
           id: generateId(),
           type: 'segment',
@@ -646,6 +779,7 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
             : `s${i + 1}`,
           startPointId,
           endPointId,
+          a, b, c,
           style: { ...defaultStyle, ...style },
           isIndependent: false,
           parentIds: [element.id, startPointId, endPointId],
@@ -658,7 +792,7 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
       if (state.construction.construction) {
         const points = pointIds.map(id => state.construction.coreElements.get(id)).filter(Boolean);
         if (points.length === pointIds.length) {
-          const corePolygon = new GeoPolygon(state.construction.construction, points as GeoPoint[]);
+          const corePolygon = new GeoPolygon(state.construction.construction, points as any);
           corePolygon.setLabel(element.label);
           state.construction.coreElements.set(element.id, corePolygon);
           state.construction.construction.addGeoElement(corePolygon);
@@ -667,7 +801,7 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
             const start = state.construction.coreElements.get(segment.startPointId);
             const end = state.construction.coreElements.get(segment.endPointId);
             if (start && end) {
-              const coreSegment = new GeoSegment(state.construction.construction, start, end);
+              const coreSegment = new GeoSegment(state.construction.construction, start as any, end as any);
               coreSegment.setLabel(segment.label);
               state.construction.coreElements.set(segment.id, coreSegment);
               state.construction.construction.addGeoElement(coreSegment);
@@ -676,10 +810,9 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
         }
       }
       
-      createIntersectionPoints(element);
       return element;
     },
-    [state.construction.elements.size, state.construction.construction, state.construction.coreElements, createIntersectionPoints]
+    [state.construction.elements.size, state.construction.construction, state.construction.coreElements]
   );
 
   const addVector = useCallback(
@@ -736,14 +869,20 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
   );
 
   const updatePointPosition = useCallback((id: string, x: number, y: number) => {
+    const point = state.construction.elements.get(id);
+    if (point && point.type === 'point' && !point.isIndependent) {
+      return;
+    }
+    
     dispatch({ type: 'SAVE_HISTORY' });
-    dispatch({ type: 'UPDATE_POINT', id, x, y });
     
     const corePoint = state.construction.coreElements.get(id);
     if (corePoint && typeof corePoint.setCoords === 'function') {
       corePoint.setCoords(x, y);
     }
-  }, [state.construction.coreElements]);
+    
+    dispatch({ type: 'UPDATE_POINT', id, x, y });
+  }, [state.construction.coreElements, state.construction.elements]);
 
   const deleteElement = useCallback((id: string) => {
     dispatch({ type: 'SAVE_HISTORY' });
@@ -791,14 +930,33 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
   const canUndo = state.history.past.length > 0;
   const canRedo = state.history.future.length > 0;
 
+  const exportData = useCallback(() => {
+    return exportToJSON(
+      state.construction.elements,
+      state.construction.elementOrder,
+      state.view
+    );
+  }, [state.construction.elements, state.construction.elementOrder, state.view]);
+
+  const importData = useCallback((jsonString: string) => {
+    const { elements, view } = importFromJSON(jsonString);
+    dispatch({ type: 'IMPORT_DATA', elements, view });
+  }, []);
+
+  const clearAll = useCallback(() => {
+    dispatch({ type: 'CLEAR_ALL' });
+  }, []);
+
   const value: GeoGebraContextValue = {
     state,
     dispatch,
     coordSystem,
     getGeoElement,
     addPoint,
+    addIntersectionPoint,
     addLine,
     addLineFromPoints,
+    addLineFromPointIds,
     addSegment,
     addCircle,
     addPolygon,
@@ -817,6 +975,9 @@ export function GeoGebraProvider({ children, initialView }: GeoGebraProviderProp
     redo,
     canUndo,
     canRedo,
+    exportData,
+    importData,
+    clearAll,
   };
 
   return <GeoGebraContext.Provider value={value}>{children}</GeoGebraContext.Provider>;

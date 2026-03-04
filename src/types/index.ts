@@ -69,8 +69,18 @@ export interface GeoPointElement extends GeoElementBase {
   type: 'point';
   x: number;
   y: number;
+  z?: number;
   pointSize: number;
   pointStyle: 'dot' | 'cross' | 'circle' | 'square';
+  path?: {
+    type: string;
+    elementId: string;
+    parameter?: number;
+  };
+  region?: {
+    type: string;
+    elementId: string;
+  };
 }
 
 export interface GeoLineElement extends GeoElementBase {
@@ -84,12 +94,18 @@ export interface GeoSegmentElement extends GeoElementBase {
   type: 'segment';
   startPointId: string;
   endPointId: string;
+  a: number;
+  b: number;
+  c: number;
 }
 
 export interface GeoRayElement extends GeoElementBase {
   type: 'ray';
   startPointId: string;
   throughPointId: string;
+  a: number;
+  b: number;
+  c: number;
 }
 
 export interface GeoCircleElement extends GeoElementBase {
@@ -101,6 +117,7 @@ export interface GeoCircleElement extends GeoElementBase {
 export interface GeoPolygonElement extends GeoElementBase {
   type: 'polygon';
   pointIds: string[];
+  vertexCount: number;
 }
 
 export interface GeoVectorElement extends GeoElementBase {
@@ -188,6 +205,7 @@ export interface ConstructionElement {
 
 // 核心几何元素接口（来自common/types/index.ts）
 export interface CoreGeoElement extends ConstructionElement {
+  isIndependent: boolean;
   isDefined(): boolean;
   setUndefined(): void;
   getParentAlgorithm(): AlgoElement | null;
@@ -235,6 +253,7 @@ export interface Construction {
   getAllAlgorithms(): AlgoElement[];
   renameGeoElement(oldLabel: string, newLabel: string): boolean;
   clear(): void;
+  getConstructionIndex(): number;
 }
 
 // 核心接口

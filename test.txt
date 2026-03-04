@@ -1,0 +1,444 @@
+内核设计
+内核主要包括：
+
+基础向量类型（Vec2/Vec3）
+几何基类 GeoElement
+路径接口 Path（点在路径上）
+具体几何对象 Point / Line / Segment / Circle / Polygon 等
+构造算法 Algorithm / Algo*
+依赖管理与增量更新 Kernel
+3.1 数学基础
+使用简化的齐次坐标 Vec3 表示点/向量，便于后续扩展更复杂几何运算。
+
+// src/types/vec.ts
+export interface Vec2 {
+  x: number;
+  y: number;
+}
+
+export interface Vec3 extends Vec2 {
+  w: number;          // w=1: 点; w=0: 方向向量
+}
+
+export const Vec3Util = {
+  createPoint: (x: number, y: number): Vec3 => ({ x, y, w: 1 }),
+  createVector: (x: number, y: number): Vec3 => ({ x, y, w: 0 }),
+
+  toCartesian: (v: Vec3): Vec2 => (
+    v.w === 0 ? { x: v.x, y: v.y } : { x: v.x / v.w, y: v.y / v.w }
+  ),
+
+  // 可选：加减、点积、叉积、归一化等
+};
+3.2 几何基类与观察者机制
+GeoElement 表示一切几何对象（点、线、圆等），统一接口，支持样式、观察者、路径绑定。
+
+// src/core/GeoElement.ts
+import type { Vec3 } from "../types/vec";
+
+export type Observer = { update: () => void };
+
+export interface Observable {
+  addObserver(o: Observer): void;
+  removeObserver(o: Observer): void;
+  notifyObservers(): void;
+}
+
+export interface Path {
+  getPointAtParameter(t: number): Vec3;
+  getParameterAtPoint(p: Vec3): number;
+  containsPoint(p: Vec3, tolerance?: number): boolean;
+}
+
+export abstract class GeoElement implements Observable {
+  readonly id: string;
+  label?: string;
+
+  protected style = {
+    color: "#000000",
+    size: 4,
+    visible: true,
+    fill: false,
+    lineWidth: 2,
+  };
+
+  protected observers: Observer[] = [];
+
+  // 点在路径上约束
+  path?: Path;
+  pathParameter?: number;
+
+  constructor(id: string, label?: string) {
+    this.id = id;
+    this.label = label;
+  }
+
+  addObserver(o: Observer) { this.observers.push(o); }
+  removeObserver(o: Observer) {
+    this.observers = this.observers.filter(x => x !== o);
+  }
+  notifyObservers() { this.observers.forEach(o => o.update()); }
+
+  setStyle(s: Partial<typeof this.style>) {
+    this.style = { ...this.style, ...s };
+    this.notifyObservers();
+  }
+
+  bindToPath(path: Path, t = 0) {
+    this.path = path;
+    this.pathParameter = t;
+    this.updateFromPath();
+  }
+
+  unbindPath() {
+    this.path = undefined;
+    this.pathParameter = undefined;
+  }
+
+  protected updateFromPath() {
+    if (this.path && this.pathParameter != null) {
+      const p = this.path.getPointAtParameter(this.pathParameter);
+      this.setCoordinates([p]);
+    }
+  }
+
+  abstract getType(): string;
+  abstract getCoordinates(): Vec3[];
+  abstract setCoordinates(coords: Vec3[]): void;
+  abstract draw(
+    ctx: CanvasRenderingContext2D,
+    scale: number,
+    offsetX: number,
+    offsetY: number
+  ): void;
+}
+3.3 路径约束 Path（点在对象上）
+示例：线段路径与圆路径：
+
+// src/core/Path.ts
+import type { Vec3 } from "../types/vec";
+
+export class SegmentPath implements Path {
+  constructor(private start: Vec3, private end: Vec3) {}
+
+  getPointAtParameter(t: number): Vec3 {
+    t = Math.max(0, Math.min(1, t));
+    return {
+      x: this.start.x + (this.end.x - this.start.x) * t,
+      y: this.start.y + (this.end.y - this.start.y) * t,
+      w: 1,
+    };
+  }
+
+  getParameterAtPoint(p: Vec3): number {
+    const dx = this.end.x - this.start.x;
+    const dy = this.end.y - this.start.y;
+    const len2 = dx * dx + dy * dy || 1;
+    const t = ((p.x - this.start.x) * dx + (p.y - this.start.y) * dy) / len2;
+    return Math.max(0, Math.min(1, t));
+  }
+
+  containsPoint(p: Vec3, tol = 0.1): boolean {
+    const t = this.getParameterAtPoint(p);
+    const q = this.getPointAtParameter(t);
+    const dist = Math.hypot(q.x - p.x, q.y - p.y);
+    return dist <= tol;
+  }
+}
+
+export class CirclePath implements Path {
+  constructor(private center: Vec3, private radius: number) {}
+
+  getPointAtParameter(t: number): Vec3 {
+    const theta = t * 2 * Math.PI;
+    return {
+      x: this.center.x + this.radius * Math.cos(theta),
+      y: this.center.y + this.radius * Math.sin(theta),
+      w: 1,
+    };
+  }
+
+  getParameterAtPoint(p: Vec3): number {
+    let angle = Math.atan2(p.y - this.center.y, p.x - this.center.x);
+    if (angle < 0) angle += 2 * Math.PI;
+    return angle / (2 * Math.PI);
+  }
+
+  containsPoint(p: Vec3, tol = 0.1): boolean {
+    const d = Math.hypot(p.x - this.center.x, p.y - this.center.y);
+    return Math.abs(d - this.radius) <= tol;
+  }
+}
+3.4 具体几何对象
+只展示点/线/圆的核心结构，你可以在代码中补齐细节（如多边形等）。
+
+// src/core/objects.ts
+import { GeoElement } from "./GeoElement";
+import { Vec3Util, type Vec3 } from "../types/vec";
+
+export class Point extends GeoElement {
+  private coord: Vec3;
+
+  constructor(id: string, coord: Vec3, label?: string) {
+    super(id, label);
+    this.coord = coord;
+    this.style.color = "#007bff";
+    this.style.size = 5;
+  }
+
+  getType() { return "point"; }
+  getCoordinates() { return [this.coord]; }
+
+  setCoordinates(coords: Vec3[]) {
+    if (coords.length !== 1) throw new Error("Point需要1个坐标");
+    this.coord = coords[0];
+    this.notifyObservers();
+  }
+
+  draw(ctx: CanvasRenderingContext2D, scale: number, ox: number, oy: number) {
+    if (!this.style.visible) return;
+    const { x, y } = Vec3Util.toCartesian(this.coord);
+    ctx.fillStyle = this.style.color;
+    ctx.beginPath();
+    ctx.arc(x * scale + ox, y * scale + oy, this.style.size, 0, Math.PI * 2);
+    ctx.fill();
+    if (this.label) {
+      ctx.fillStyle = "#000";
+      ctx.font = "12px sans-serif";
+      ctx.fillText(this.label, x * scale + ox + 6, y * scale + oy - 6);
+    }
+  }
+}
+
+export class Line extends GeoElement {
+  private start: Vec3;
+  private end: Vec3;
+
+  constructor(id: string, start: Vec3, end: Vec3, label?: string) {
+    super(id, label);
+    this.start = start;
+    this.end = end;
+  }
+
+  getType() { return "line"; }
+  getCoordinates() { return [this.start, this.end]; }
+
+  setCoordinates(coords: Vec3[]) {
+    if (coords.length !== 2) throw new Error("Line需要2个坐标");
+    [this.start, this.end] = coords;
+    this.notifyObservers();
+  }
+
+  draw(ctx: CanvasRenderingContext2D, scale: number, ox: number, oy: number) {
+    if (!this.style.visible) return;
+    const s = Vec3Util.toCartesian(this.start);
+    const e = Vec3Util.toCartesian(this.end);
+    ctx.strokeStyle = this.style.color;
+    ctx.lineWidth = this.style.lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(s.x * scale + ox, s.y * scale + oy);
+    ctx.lineTo(e.x * scale + ox, e.y * scale + oy);
+    ctx.stroke();
+  }
+}
+
+export class Circle extends GeoElement {
+  private center: Vec3;
+  private radius: number;
+
+  constructor(id: string, center: Vec3, radius: number, label?: string) {
+    super(id, label);
+    this.center = center;
+    this.radius = radius;
+    this.style.color = "#ff0000";
+  }
+
+  getType() { return "circle"; }
+  getCoordinates() { return [this.center]; }
+
+  setCoordinates(coords: Vec3[]) {
+    if (coords.length !== 1) throw new Error("Circle需要1个中心坐标");
+    this.center = coords[0];
+    this.notifyObservers();
+  }
+
+  setRadius(r: number) {
+    this.radius = r;
+    this.notifyObservers();
+  }
+
+  getRadius() { return this.radius; }
+
+  draw(ctx: CanvasRenderingContext2D, scale: number, ox: number, oy: number) {
+    if (!this.style.visible) return;
+    const c = Vec3Util.toCartesian(this.center);
+    ctx.strokeStyle = this.style.color;
+    ctx.lineWidth = this.style.lineWidth;
+    ctx.beginPath();
+    ctx.arc(c.x * scale + ox, c.y * scale + oy, this.radius * scale, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+3.5 构造算法（Algorithm）
+算法层只负责「输入 → 输出」，不关心 UI。
+
+// src/core/algorithms.ts
+import type { Observer } from "./GeoElement";
+import { Point, Line, Circle } from "./objects";
+import type { Vec3 } from "../types/vec";
+
+export interface Algorithm extends Observer {
+  id: string;
+  type: string;
+  inputIds: string[];
+  outputIds: string[];
+  execute(): void;
+  update(): void; // Observer 接口
+}
+
+// 两点一线
+export class AlgoLineThroughTwoPoints implements Algorithm {
+  id: string;
+  type = "line_through_two_points";
+  inputIds: string[];
+  outputIds: string[];
+
+  constructor(
+    id: string,
+    private p1: Point,
+    private p2: Point,
+    private line: Line
+  ) {
+    this.id = id;
+    this.inputIds = [p1.id, p2.id];
+    this.outputIds = [line.id];
+    p1.addObserver(this);
+    p2.addObserver(this);
+  }
+
+  execute() {
+    this.line.setCoordinates([
+      this.p1.getCoordinates()[0],
+      this.p2.getCoordinates()[0],
+    ]);
+  }
+
+  update() {
+    this.execute();
+  }
+}
+
+// 中点
+export class AlgoMidpoint implements Algorithm {
+  id: string;
+  type = "midpoint";
+  inputIds: string[];
+  outputIds: string[];
+
+  constructor(
+    id: string,
+    private p1: Point,
+    private p2: Point,
+    private mid: Point
+  ) {
+    this.id = id;
+    this.inputIds = [p1.id, p2.id];
+    this.outputIds = [mid.id];
+    p1.addObserver(this);
+    p2.addObserver(this);
+  }
+
+  execute() {
+    const a = this.p1.getCoordinates()[0];
+    const b = this.p2.getCoordinates()[0];
+    const m: Vec3 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, w: 1 };
+    this.mid.setCoordinates([m]);
+  }
+
+  update() {
+    this.execute();
+  }
+}
+3.6 内核与依赖图
+Kernel 维护所有几何对象与算法，提供增量更新能力。
+
+// src/core/Kernel.ts
+import type { GeoElement, Observer } from "./GeoElement";
+import type { Algorithm } from "./algorithms";
+
+export class Kernel implements Observer {
+  private elements = new Map<string, GeoElement>();
+  private algorithms = new Map<string, Algorithm>();
+  private elementToAlgos = new Map<string, Set<string>>();
+
+  // 视图状态
+  scale = 1;
+  offsetX = 0;
+  offsetY = 0;
+
+  private observers: Observer[] = [];
+
+  addObserver(o: Observer) { this.observers.push(o); }
+  removeObserver(o: Observer) {
+    this.observers = this.observers.filter(x => x !== o);
+  }
+  notifyObservers() { this.observers.forEach(o => o.update()); }
+
+  addElement(el: GeoElement) {
+    this.elements.set(el.id, el);
+    this.notifyObservers();
+  }
+
+  addAlgorithm(algo: Algorithm) {
+    this.algorithms.set(algo.id, algo);
+    algo.execute();
+    // 注册依赖
+    algo.inputIds.forEach(id => {
+      if (!this.elementToAlgos.has(id)) {
+        this.elementToAlgos.set(id, new Set());
+      }
+      this.elementToAlgos.get(id)!.add(algo.id);
+    });
+    this.notifyObservers();
+  }
+
+  getElements(): GeoElement[] {
+    return [...this.elements.values()];
+  }
+
+  getAlgorithms(): Map<string, Algorithm> {
+    return this.algorithms;
+  }
+
+  clear() {
+    this.elements.clear();
+    this.algorithms.clear();
+    this.elementToAlgos.clear();
+    this.notifyObservers();
+  }
+
+  // 某元素更新（例如点拖动）时调用
+  elementChanged(elementId: string) {
+    const dirtyAlgos = new Set<string>();
+
+    const dfs = (id: string) => {
+      const algos = this.elementToAlgos.get(id);
+      if (!algos) return;
+      algos.forEach(aid => {
+        if (!dirtyAlgos.has(aid)) {
+          dirtyAlgos.add(aid);
+          const algo = this.algorithms.get(aid);
+          algo?.outputIds.forEach(outId => dfs(outId));
+        }
+      });
+    };
+
+    dfs(elementId);
+    dirtyAlgos.forEach(aid => this.algorithms.get(aid)?.execute());
+    this.notifyObservers();
+  }
+
+  update() {
+    // 内核作为某些对象观察者时，可触发全局重算
+  }
+}

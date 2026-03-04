@@ -2,8 +2,8 @@ import React, { useRef, useEffect, useCallback, useState, useImperativeHandle, f
 import { useGeoGebra } from '../core/GeoGebraContext';
 import { ScreenPoint, WorldPoint } from '../types';
 import { CanvasRenderer } from '../euclidian/CanvasRenderer';
-import { SnapManagerImpl, SnapTarget, DEFAULT_SNAP_CONFIG } from '../euclidian/snapping';
-import { findIntersections } from '../common/geometry/intersection';
+import { SnapManagerImpl, SnapTarget, DEFAULT_SNAP_CONFIG } from './snapping';
+import { findIntersections } from './interaction';
 
 interface PreviewData {
   type: 'segment' | 'line' | 'circle' | 'polygon';

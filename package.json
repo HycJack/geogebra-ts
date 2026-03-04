@@ -1,6 +1,7 @@
 {
   "name": "react-geogebra",
   "version": "1.0.0",
+  "type": "module",
   "description": "React-based geometric drawing system inspired by GeoGebra",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
