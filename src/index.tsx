@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { GeoGebraProvider } from './core/GeoGebraContext';
-import { EuclidianView, Toolbar, ObjectList, PropertiesPanel, EuclidianViewRef } from './components';
+import { EuclidianView, Toolbar, ObjectList, PropertiesPanel, EuclidianViewRef } from './euclidian';
 import { ViewState } from './types';
 import { cn } from './lib/utils';
 
@@ -68,6 +68,6 @@ export function GeoGebra({
 }
 
 export { GeoGebraProvider, useGeoGebra } from './core/GeoGebraContext';
-export { EuclidianView, Toolbar, ObjectList, PropertiesPanel } from './components';
+export { EuclidianView, Toolbar, ObjectList, PropertiesPanel } from './euclidian';
 export * from './types';
 export * from './utils/coordinates';

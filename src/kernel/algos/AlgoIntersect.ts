@@ -226,33 +226,33 @@ export class AlgoIntersectLineConic extends AlgoIntersect {
 }
 
 export class AlgoIntersectConics extends AlgoIntersect {
-  private conic1: [number, number, number, number, number, number];
-  private conic2: [number, number, number, number, number, number];
+  // private conic1: [number, number, number, number, number, number];
+  // private conic2: [number, number, number, number, number, number];
 
   constructor(
     construction: Construction,
-    conic1: [number, number, number, number, number, number],
-    conic2: [number, number, number, number, number, number]
+    // conic1: [number, number, number, number, number, number],
+    // conic2: [number, number, number, number, number, number]
   ) {
     super(construction);
-    this.conic1 = conic1;
-    this.conic2 = conic2;
+    // this.conic1 = conic1;
+    // this.conic2 = conic2;
     this.compute();
   }
 
   compute(): void {
     this.clearIntersectionPoints();
     
-    const [A1, C1, F1, B1, D1, E1] = this.conic1;
-    const [A2, C2, F2, B2, D2, E2] = this.conic2;
+    // const [A1, C1, F1, B1, D1, E1] = this.conic1;
+    // const [A2, C2, F2, B2, D2, E2] = this.conic2;
     
-    const lambda = 0.5;
-    const _A = A1 + lambda * (A2 - A1);
-    const _B = B1 + lambda * (B2 - B1);
-    const _C = C1 + lambda * (C2 - C1);
-    const _D = D1 + lambda * (D2 - D1);
-    const _E = E1 + lambda * (E2 - E1);
-    const _F = F1 + lambda * (F2 - F1);
+    // const lambda = 0.5;
+    // const _A = A1 + lambda * (A2 - A1);
+    // const _B = B1 + lambda * (B2 - B1);
+    // const _C = C1 + lambda * (C2 - C1);
+    // const _D = D1 + lambda * (D2 - D1);
+    // const _E = E1 + lambda * (E2 - E1);
+    // const _F = F1 + lambda * (F2 - F1);
     
     // TODO: 使用计算出的系数求解交点
     this.addIntersectionPoint(0, 0, false);

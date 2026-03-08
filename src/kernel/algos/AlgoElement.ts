@@ -18,7 +18,7 @@ export type ElementFactory<T> = (index: number, label?: string) => T;
 
 export class OutputHandler<T extends IGeoElement> {
   private output: T[] = [];
-  private _factory: ElementFactory<T>;
+  private _factory: ElementFactory<T> | null = null;
   private _outputInterface: OutputHandlerInterface<T>;
   private _labels?: string[];
 
@@ -43,6 +43,10 @@ export class OutputHandler<T extends IGeoElement> {
   }
 
   getOutput(): T[] {
+    this._labels?.forEach((label, index) => {
+      this.setOutputAt(index, this._factory!(index, label));
+    });
+    this._factory = null;
     return this.output;
   }
 

@@ -129,9 +129,9 @@ export class GeoLine extends GeoElementBase implements Path {
     return Math.abs(this.a * x + this.b * y + this.c) < tolerance;
   }
 
-  pointChanged(point: any): void {
-    const x = point.x;
-    const y = point.y;
+  pointChanged(point: { getX(): number; getY(): number; setCoords(x: number, y: number): void }): void {
+    const x = point.getX();
+    const y = point.getY();
     
     // 直线方程: ax + by + c = 0
     const a = this.a, b = this.b, c = this.c;
@@ -145,11 +145,10 @@ export class GeoLine extends GeoElementBase implements Path {
     const xProj = (b * (b * x - a * y) - a * c) / denom;
     const yProj = (a * (-b * x + a * y) - b * c) / denom;
     
-    point.x = xProj;
-    point.y = yProj;
+    point.setCoords(xProj, yProj);
   }
 
-  pathChanged(_point: any): void {
+  pathChanged(_point: { getX(): number; getY(): number; setCoords(x: number, y: number): void }): void {
     // 直线本身变化时的处理
   }
 

@@ -5,7 +5,7 @@
  * 负责创建各种几何对象实例
  */
 
-import type { Construction } from './Construction';
+// import type { Construction } from './Construction';
 import type { GeoElementType, GeoElement, GeoElementStyle } from './geos/GeoElement';
 import { ConicType } from './geos/GeoConic';
 import { AngleStyle, AngleDecoration } from './geos/GeoAngle';
@@ -96,12 +96,12 @@ export interface FunctionCreateOptions extends GeoCreateOptions {
 }
 
 export class GeoFactory {
-  private _construction: Construction;
+  // private _construction: Construction;
   private idCounter: number = 0;
 
-  constructor(construction: Construction) {
-    this._construction = construction;
-  }
+  // constructor(construction: Construction) {
+  //   this._construction = construction;
+  // }
 
   createGeoElement(type: GeoTypeString, options?: GeoCreateOptions): GeoElement | null {
     switch (type) {
@@ -540,8 +540,8 @@ export class GeoFactory {
     return this.createGeoElement(type, { ...geo } as GeoCreateOptions);
   }
 
-  copyInternal(geo: GeoElement, newConstruction: Construction): GeoElement | null {
-    const factory = new GeoFactory(newConstruction);
-    return factory.copy(geo);
-  }
+  // copyInternal(geo: GeoElement, newConstruction: Construction): GeoElement | null {
+  //   const factory = new GeoFactory(newConstruction);
+  //   return factory.copy(geo);
+  // }
 }

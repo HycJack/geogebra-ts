@@ -1,18 +1,20 @@
 import React, { useRef, useEffect, useCallback, useState, useImperativeHandle, forwardRef } from 'react';
 import { useGeoGebra } from '../core/GeoGebraContext';
 import { ScreenPoint, WorldPoint } from '../types';
-import { CanvasRenderer } from '../euclidian/CanvasRenderer';
+import { CanvasRenderer } from './CanvasRenderer';
 import { SnapManagerImpl, SnapTarget, DEFAULT_SNAP_CONFIG } from './snapping';
 import { findIntersections } from './interaction';
+import { ZoomIn, ZoomOut, Undo2, Redo2 } from 'lucide-react';
 
 interface PreviewData {
-  type: 'segment' | 'line' | 'circle' | 'polygon';
+  type: 'segment' | 'line' | 'circle' | 'polygon' | 'perpendicular' | 'parallel' | 'bisector' | 'angular' | 'point';
   startPoint?: WorldPoint;
   endPoint?: WorldPoint;
   center?: WorldPoint;
   radius?: number;
   points?: WorldPoint[];
   lineParams?: { a: number; b: number; c: number };
+  sourceLineParams?: { a: number; b: number; c: number };
 }
 
 interface EuclidianViewProps {
@@ -56,7 +58,7 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
     initialPositions: Map<string, { x: number; y: number }>;
     startWorld: { x: number; y: number };
   } | null>(null);
-  const { state, dispatch, updatePointPosition, selectElements, setHovered, startDrag, endDrag, setPreview, addPoint, addIntersectionPoint, addLineFromPointIds, addSegment, addCircle, addPolygon, deleteElement } = useGeoGebra();
+  const { state, dispatch, updatePointPosition, selectElements, setHovered, startDrag, endDrag, setPreview, addPoint, addIntersectionPoint, addLineFromPointIds, addSegment, addCircle, addPolygon, addVector, deleteElement, addLine, undo, redo, canUndo, canRedo } = useGeoGebra();
 
   const [pendingPoints, setPendingPoints] = useState<WorldPoint[]>([]);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
@@ -70,7 +72,7 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
     if (!canvasRef.current) return;
 
     const renderer = new CanvasRenderer({
-      showGrid,
+      showGrid, 
       showAxes,
       backgroundColor: '#ffffff',
     });
@@ -95,7 +97,7 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
     initSize();
 
     requestAnimationFrame(() => {
-      initSize();
+      renderElements();
     });
 
     return () => {
@@ -105,11 +107,82 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
     };
   }, [showGrid, showAxes, enableSnap]);
 
+  // 当view状态变化时更新renderer配置
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (renderer) {
+      renderer.options.showGrid = state.view.showGrid;
+      renderer.options.showAxes = state.view.showAxes;
+      renderElements();
+    }
+  }, [state.view.showGrid, state.view.showAxes]);
+
   useEffect(() => {
     if (snapManagerRef.current) {
       snapManagerRef.current.updateElements(state.construction.elements);
     }
   }, [state.construction.elements]);
+
+  const applyMirrorTransform = useCallback((element: any, mirrorAxis: any) => {
+    const { a, b, c } = mirrorAxis.type === 'line' 
+      ? { a: mirrorAxis.a, b: mirrorAxis.b, c: mirrorAxis.c }
+      : (() => {
+          const start = state.construction.elements.get(mirrorAxis.startPointId);
+          const end = state.construction.elements.get(mirrorAxis.endPointId);
+          if (start && end && start.type === 'point' && end.type === 'point') {
+            return { 
+              a: start.y - end.y, 
+              b: end.x - start.x, 
+              c: start.x * end.y - end.x * start.y 
+            };
+          }
+          return { a: 0, b: 1, c: 0 };
+        })();
+    
+    if (element.type === 'point') {
+      const x = element.x;
+      const y = element.y;
+      const d = (a * x + b * y + c) / (a * a + b * b);
+      const newX = x - 2 * a * d;
+      const newY = y - 2 * b * d;
+      
+      addPoint(newX, newY, `${element.label}'`);
+    } else if (element.type === 'segment') {
+      const start = state.construction.elements.get(element.startPointId);
+      const end = state.construction.elements.get(element.endPointId);
+      if (start && end && start.type === 'point' && end.type === 'point') {
+        const x1 = start.x, y1 = start.y;
+        const x2 = end.x, y2 = end.y;
+        const d1 = (a * x1 + b * y1 + c) / (a * a + b * b);
+        const d2 = (a * x2 + b * y2 + c) / (a * a + b * b);
+        const newP1 = addPoint(x1 - 2 * a * d1, y1 - 2 * b * d1, `${start.label}'`);
+        const newP2 = addPoint(x2 - 2 * a * d2, y2 - 2 * b * d2, `${end.label}'`);
+        addSegment(newP1.id, newP2.id, `${element.label}'`);
+      }
+    }
+  }, [state.construction.elements, addPoint, addSegment]);
+
+  const applyRotateTransform = useCallback((element: any, centerX: number, centerY: number, angle: number) => {
+    if (element.type === 'point') {
+      const x = element.x;
+      const y = element.y;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const newX = centerX + (x - centerX) * cos - (y - centerY) * sin;
+      const newY = centerY + (x - centerX) * sin + (y - centerY) * cos;
+      updatePointPosition(element.id, newX, newY);
+    }
+  }, [updatePointPosition]);
+
+  const applyScaleTransform = useCallback((element: any, centerX: number, centerY: number, scale: number) => {
+    if (element.type === 'point') {
+      const x = element.x;
+      const y = element.y;
+      const newX = centerX + (x - centerX) * scale;
+      const newY = centerY + (y - centerY) * scale;
+      updatePointPosition(element.id, newX, newY);
+    }
+  }, [updatePointPosition]);
 
   const renderElements = useCallback(() => {
     if (!rendererRef.current) return;
@@ -327,6 +400,16 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
           }
         }
       }
+
+      if ((previewData.type === 'perpendicular' || previewData.type === 'parallel' || previewData.type === 'bisector' || previewData.type === 'angular') && previewData.lineParams) {
+        renderer.drawLine(
+          previewData.lineParams.a,
+          previewData.lineParams.b,
+          previewData.lineParams.c,
+          '#999999',
+          1
+        );
+      }
     }
 
     if (snapManagerRef.current && snapTargetRef.current && state.interaction.mode !== 'pan') {
@@ -446,6 +529,42 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
     []
   );
 
+  const isPointInPolygon = useCallback(
+    (x: number, y: number, points: { x: number; y: number }[]): boolean => {
+      let inside = false;
+      for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+        const xi = points[i].x, yi = points[i].y;
+        const xj = points[j].x, yj = points[j].y;
+        
+        const intersect = ((yi > y) !== (yj > y)) &&
+          (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    },
+    []
+  );
+
+  const distanceToSegment = useCallback(
+    (px: number, py: number, x1: number, y1: number, x2: number, y2: number): number => {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const lengthSq = dx * dx + dy * dy;
+      
+      if (lengthSq === 0) {
+        return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+      }
+      
+      let t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSq));
+      const closestX = x1 + t * dx;
+      const closestY = y1 + t * dy;
+      
+      return Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
+    },
+    []
+  );
+
   const hitTest = useCallback(
     (screenX: number, screenY: number): string | null => {
       const threshold = 8;
@@ -517,6 +636,58 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
               return id;
             }
           }
+        } else if (element.type === 'circle') {
+          const center = state.construction.elements.get(element.centerId);
+          if (center && center.type === 'point') {
+            if (!rendererRef.current) continue;
+            
+            const screen = rendererRef.current.worldToScreen(center.x, center.y);
+            const dx = screenX - screen.x;
+            const dy = screenY - screen.y;
+            const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+            const screenRadius = element.radius * rendererRef.current.getScale();
+            
+            // 检测是否在圆边缘附近
+            const distance = Math.abs(distanceFromCenter - screenRadius);
+            if (distance <= threshold + (element.style.strokeWidth || 1) / 2) {
+              return id;
+            }
+          }
+        } else if (element.type === 'polygon') {
+          const polygon = element as any;
+          if (polygon.pointIds && polygon.pointIds.length >= 3) {
+            if (!rendererRef.current) continue;
+            
+            // 获取所有顶点的屏幕坐标
+            const screenPoints: { x: number; y: number }[] = [];
+            for (const pointId of polygon.pointIds) {
+              const point = state.construction.elements.get(pointId);
+              if (point && point.type === 'point') {
+                const screen = rendererRef.current.worldToScreen(point.x, point.y);
+                screenPoints.push({ x: screen.x, y: screen.y });
+              }
+            }
+            
+            if (screenPoints.length >= 3) {
+              // 检测是否在多边形内部
+              if (isPointInPolygon(screenX, screenY, screenPoints)) {
+                return id;
+              }
+              
+              // 检测是否靠近边
+              let minDistance = Infinity;
+              for (let i = 0; i < screenPoints.length; i++) {
+                const p1 = screenPoints[i];
+                const p2 = screenPoints[(i + 1) % screenPoints.length];
+                const dist = distanceToSegment(screenX, screenY, p1.x, p1.y, p2.x, p2.y);
+                minDistance = Math.min(minDistance, dist);
+              }
+              
+              if (minDistance <= threshold + (polygon.style.strokeWidth || 1) / 2) {
+                return id;
+              }
+            }
+          }
         }
       }
 
@@ -556,11 +727,18 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
         case 'move': {
           const hitId = hitTest(screenPos.x, screenPos.y);
           if (hitId) {
+            const element = state.construction.elements.get(hitId);
+            
+            // 检查是否是交点，如果是交点则不允许直接移动
+            if (element && element.type === 'point' && !element.isIndependent && element.label && element.label.startsWith('I')) {
+              // 交点不能直接移动，忽略点击
+              break;
+            }
+            
             selectElements([hitId]);
             startDrag(screenPos);
             setBoxSelection(null);
             
-            const element = state.construction.elements.get(hitId);
             if (element) {
               const pointIds: string[] = [];
               const initialPositions = new Map<string, { x: number; y: number }>();
@@ -572,6 +750,14 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
                 const line = element as any;
                 if (line.parentIds && line.parentIds.length === 2) {
                   pointIds.push(...line.parentIds);
+                }
+              } else if (element.type === 'circle') {
+                const circle = element as any;
+                pointIds.push(circle.centerId);
+              } else if (element.type === 'polygon') {
+                const polygon = element as any;
+                if (polygon.pointIds) {
+                  pointIds.push(...polygon.pointIds);
                 }
               }
               
@@ -677,7 +863,8 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
           break;
         }
 
-        case 'circle': {
+        case 'circle':
+        case 'circle_center_point': {
           if (pendingPoints.length === 0) {
             if (snapTarget?.type === 'point' && snapTarget.elementId) {
               const existingPoint = state.construction.elements.get(snapTarget.elementId);
@@ -712,7 +899,109 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
             const radius = Math.sqrt(
               Math.pow(edgePoint.x - cx, 2) + Math.pow(edgePoint.y - cy, 2)
             );
-            addCircle(centerId, radius);
+            addCircle(centerId, radius, undefined, undefined, true);
+            setPendingPoints([]);
+            setPreviewData(null);
+          }
+          break;
+        }
+
+        case 'circle_center_radius': {
+          if (pendingPoints.length === 0) {
+            if (snapTarget?.type === 'point' && snapTarget.elementId) {
+              const existingPoint = state.construction.elements.get(snapTarget.elementId);
+              if (existingPoint && existingPoint.type === 'point') {
+                setPendingPoints([{ x: existingPoint.x, y: existingPoint.y, id: existingPoint.id }]);
+              }
+            } else {
+              setPendingPoints([worldPos]);
+            }
+          } else {
+            let centerId: string = '';
+            
+            if (pendingPoints[0].id) {
+              centerId = pendingPoints[0].id;
+            } else {
+              const center = addPoint(pendingPoints[0].x, pendingPoints[0].y);
+              centerId = center.id;
+            }
+            
+            const radiusInput = prompt('请输入半径:', '1');
+            const radius = radiusInput ? parseFloat(radiusInput) : NaN;
+            if (!isNaN(radius) && radius > 0 && centerId) {
+              addCircle(centerId, radius);
+            }
+            setPendingPoints([]);
+            setPreviewData(null);
+          }
+          break;
+        }
+
+        case 'circle_point_radius': {
+          if (pendingPoints.length === 0) {
+            setPendingPoints([worldPos]);
+          } else {
+            const radius = Math.sqrt(
+              Math.pow(worldPos.x - pendingPoints[0].x, 2) + Math.pow(worldPos.y - pendingPoints[0].y, 2)
+            );
+            
+            let centerId: string;
+            if (snapTarget?.type === 'point' && snapTarget.elementId) {
+              centerId = snapTarget.elementId;
+            } else {
+              const center = addPoint(worldPos.x, worldPos.y);
+              centerId = center.id;
+            }
+            
+            addCircle(centerId, radius, undefined, undefined, false);
+            setPendingPoints([]);
+            setPreviewData(null);
+          }
+          break;
+        }
+
+        case 'circle_three_points': {
+          if (pendingPoints.length < 3) {
+            if (snapTarget?.type === 'point' && snapTarget.elementId) {
+              const existingPoint = state.construction.elements.get(snapTarget.elementId);
+              if (existingPoint && existingPoint.type === 'point') {
+                setPendingPoints([...pendingPoints, { x: existingPoint.x, y: existingPoint.y, id: existingPoint.id }]);
+              }
+            } else {
+              setPendingPoints([...pendingPoints, worldPos]);
+            }
+          } else if (pendingPoints.length === 3) {
+            const p1 = pendingPoints[0];
+            const p2 = pendingPoints[1];
+            const p3 = pendingPoints[2];
+            
+            // 计算过三点的圆
+            const A = p2.x - p1.x;
+            const B = p2.y - p1.y;
+            const C = p3.x - p1.x;
+            const D = p3.y - p1.y;
+            const E = A * (p1.x + p2.x) + B * (p1.y + p2.y);
+            const F = C * (p1.x + p3.x) + D * (p1.y + p3.y);
+            const G = 2 * (A * (p3.y - p2.y) - B * (p3.x - p2.x));
+            
+            if (Math.abs(G) > 1e-10) {
+              const cx = (D * E - B * F) / G;
+              const cy = (A * F - C * E) / G;
+              
+              let centerId: string;
+              if (snapTarget?.type === 'point' && snapTarget.elementId) {
+                centerId = snapTarget.elementId;
+              } else {
+                const center = addPoint(cx, cy);
+                centerId = center.id;
+              }
+              
+              const radius = Math.sqrt(
+                Math.pow(cx - p1.x, 2) + Math.pow(cy - p1.y, 2)
+              );
+              addCircle(centerId, radius, undefined, undefined, false);
+            }
+            
             setPendingPoints([]);
             setPreviewData(null);
           }
@@ -762,6 +1051,47 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
           break;
         }
 
+        case 'vector': {
+          if (pendingPoints.length === 0) {
+            if (snapTarget?.type === 'point' && snapTarget.elementId) {
+              const existingPoint = state.construction.elements.get(snapTarget.elementId);
+              if (existingPoint && existingPoint.type === 'point') {
+                setPendingPoints([{ x: existingPoint.x, y: existingPoint.y, id: existingPoint.id }]);
+              }
+            } else {
+              setPendingPoints([worldPos]);
+            }
+          } else {
+            let startPointId: string;
+            
+            if (pendingPoints[0].id) {
+              startPointId = pendingPoints[0].id;
+            } else {
+              const startPoint = addPoint(pendingPoints[0].x, pendingPoints[0].y);
+              startPointId = startPoint.id;
+            }
+            
+            let endPointId: string;
+            if (snapTarget?.type === 'point' && snapTarget.elementId) {
+              const existingPoint = state.construction.elements.get(snapTarget.elementId);
+              if (existingPoint && existingPoint.type === 'point') {
+                endPointId = existingPoint.id;
+              } else {
+                const newEndPoint = addPoint(worldPos.x, worldPos.y);
+                endPointId = newEndPoint.id;
+              }
+            } else {
+              const newEndPoint = addPoint(worldPos.x, worldPos.y);
+              endPointId = newEndPoint.id;
+            }
+            
+            addVector(startPointId, endPointId);
+            setPendingPoints([]);
+            setPreviewData(null);
+          }
+          break;
+        }
+
         case 'delete': {
           const hitId = hitTest(screenPos.x, screenPos.y);
           if (hitId) {
@@ -799,11 +1129,218 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
           break;
         }
 
+        case 'perpendicular':
+        case 'parallel': {
+          if (pendingPoints.length === 0) {
+            const hitId = hitTest(screenPos.x, screenPos.y);
+            if (hitId) {
+              const element = state.construction.elements.get(hitId);
+              if (element && (element.type === 'line' || element.type === 'segment')) {
+                let lineParams: { a: number; b: number; c: number };
+                if (element.type === 'line') {
+                  lineParams = { a: element.a, b: element.b, c: element.c };
+                } else {
+                  const startPoint = state.construction.elements.get(element.startPointId);
+                  const endPoint = state.construction.elements.get(element.endPointId);
+                  if (startPoint && endPoint && startPoint.type === 'point' && endPoint.type === 'point') {
+                    const x1 = startPoint.x, y1 = startPoint.y;
+                    const x2 = endPoint.x, y2 = endPoint.y;
+                    lineParams = { a: y1 - y2, b: x2 - x1, c: x1 * y2 - x2 * y1 };
+                  } else {
+                    break;
+                  }
+                }
+                setPendingPoints([{ x: lineParams.a, y: lineParams.b, id: hitId }]);
+                setPreviewData({ 
+                  type: state.interaction.mode as 'perpendicular' | 'parallel',
+                  sourceLineParams: lineParams 
+                });
+              }
+            }
+          } else if (pendingPoints.length === 1 && previewData?.sourceLineParams) {
+            const lineParams = previewData.sourceLineParams;
+            const { a, b } = lineParams;
+            
+            let pointX: number, pointY: number;
+            if (snapTarget?.type === 'point' && snapTarget.elementId) {
+              const existingPoint = state.construction.elements.get(snapTarget.elementId);
+              if (existingPoint && existingPoint.type === 'point') {
+                pointX = existingPoint.x;
+                pointY = existingPoint.y;
+              } else {
+                break;
+              }
+            } else {
+              pointX = worldPos.x;
+              pointY = worldPos.y;
+            }
+            
+            if (state.interaction.mode === 'perpendicular') {
+              const newA = -b;
+              const newB = a;
+              const newC = b * pointX - a * pointY;
+              addLine(newA, newB, newC);
+            } else {
+              const newC = -a * pointX - b * pointY;
+              addLine(a, b, newC);
+            }
+            
+            setPendingPoints([]);
+            setPreviewData(null);
+          }
+          break;
+        }
+
+        case 'perpendicular_bisector': {
+          if (pendingPoints.length === 0) {
+            if (snapTarget?.type === 'point' && snapTarget.elementId) {
+              const existingPoint = state.construction.elements.get(snapTarget.elementId);
+              if (existingPoint && existingPoint.type === 'point') {
+                setPendingPoints([{ x: existingPoint.x, y: existingPoint.y, id: existingPoint.id }]);
+              }
+            } else {
+              setPendingPoints([worldPos]);
+            }
+          } else if (pendingPoints.length === 1) {
+            const p1 = pendingPoints[0];
+            const p2 = worldPos;
+            
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const mx = (p1.x + p2.x) / 2;
+            const my = (p1.y + p2.y) / 2;
+            
+            const a = dx;
+            const b = dy;
+            const c = -(dx * mx + dy * my);
+            
+            addLine(a, b, c);
+            setPendingPoints([]);
+            setPreviewData(null);
+          }
+          break;
+        }
+
+        case 'angular_bisector': {
+          if (pendingPoints.length < 3) {
+            if (snapTarget?.type === 'point' && snapTarget.elementId) {
+              const existingPoint = state.construction.elements.get(snapTarget.elementId);
+              if (existingPoint && existingPoint.type === 'point') {
+                setPendingPoints([...pendingPoints, { x: existingPoint.x, y: existingPoint.y, id: existingPoint.id }]);
+              }
+            } else {
+              setPendingPoints([...pendingPoints, worldPos]);
+            }
+          } else if (pendingPoints.length === 3) {
+            const vertex = pendingPoints[1];
+            const p1 = pendingPoints[0];
+            const p2 = pendingPoints[2];
+            
+            const dx1 = p1.x - vertex.x;
+            const dy1 = p1.y - vertex.y;
+            const dx2 = p2.x - vertex.x;
+            const dy2 = p2.y - vertex.y;
+            
+            const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+            const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+            
+            const nx1 = dx1 / len1;
+            const ny1 = dy1 / len1;
+            const nx2 = dx2 / len2;
+            const ny2 = dy2 / len2;
+            
+            const bx = nx1 + nx2;
+            const by = ny1 + ny2;
+            
+            const blen = Math.sqrt(bx * bx + by * by);
+            
+            let a, b, c;
+            if (blen < 1e-10) {
+              a = -ny1;
+              b = nx1;
+              c = ny1 * vertex.x - nx1 * vertex.y;
+            } else {
+              const nbx = bx / blen;
+              const nby = by / blen;
+              a = -nby;
+              b = nbx;
+              c = nby * vertex.x - nbx * vertex.y;
+            }
+            
+            addLine(a, b, c);
+            setPendingPoints([]);
+            setPreviewData(null);
+          }
+          break;
+        }
+
         case 'pan': {
           panStartRef.current = screenPos;
           isPanningRef.current = true;
           if (canvasRef.current) {
             canvasRef.current.style.cursor = 'grabbing';
+          }
+          break;
+        }
+
+        case 'translate': {
+          const hitId = hitTest(screenPos.x, screenPos.y);
+          if (hitId) {
+            selectElements([hitId]);
+            startDrag(screenPos);
+          }
+          break;
+        }
+
+        case 'rotate': {
+          if (pendingPoints.length === 0) {
+            const hitId = hitTest(screenPos.x, screenPos.y);
+            if (hitId) {
+              selectElements([hitId]);
+              setPendingPoints([{ x: worldPos.x, y: worldPos.y, id: hitId }]);
+            }
+          } else if (pendingPoints.length === 1) {
+            setPendingPoints([...pendingPoints, worldPos]);
+          }
+          break;
+        }
+
+        case 'scale': {
+          if (pendingPoints.length === 0) {
+            const hitId = hitTest(screenPos.x, screenPos.y);
+            if (hitId) {
+              selectElements([hitId]);
+              setPendingPoints([{ x: worldPos.x, y: worldPos.y, id: hitId }]);
+            }
+          } else if (pendingPoints.length === 1) {
+            setPendingPoints([...pendingPoints, worldPos]);
+          }
+          break;
+        }
+
+        case 'mirror': {
+          if (pendingPoints.length === 0) {
+            const hitId = hitTest(screenPos.x, screenPos.y);
+            if (hitId) {
+              selectElements([hitId]);
+              setPendingPoints([{ x: worldPos.x, y: worldPos.y, id: hitId }]);
+            }
+          } else if (pendingPoints.length === 1) {
+            const mirrorAxisId = hitTest(screenPos.x, screenPos.y);
+            if (mirrorAxisId) {
+              const mirrorElement = state.construction.elements.get(mirrorAxisId);
+              if (mirrorElement && (mirrorElement.type === 'line' || mirrorElement.type === 'segment')) {
+                const selectedId = pendingPoints[0].id;
+                if (selectedId) {
+                  const selectedElement = state.construction.elements.get(selectedId);
+                  if (selectedElement) {
+                    applyMirrorTransform(selectedElement, mirrorElement);
+                  }
+                }
+              }
+            }
+            setPendingPoints([]);
+            setPreviewData(null);
           }
           break;
         }
@@ -844,7 +1381,7 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
         return;
       }
       
-      const needsSnap = ['point', 'segment', 'line', 'circle', 'polygon'].includes(state.interaction.mode);
+      const needsSnap = ['point', 'segment', 'line', 'circle', 'polygon', 'perpendicular', 'parallel', 'perpendicular_bisector', 'angular_bisector'].includes(state.interaction.mode);
       
       if (needsSnap) {
         worldPos = getSnappedPosition(screenPos, worldPos);
@@ -891,7 +1428,7 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
           const c = worldPos.x * pendingPoints[0].y - pendingPoints[0].x * worldPos.y;
           newPreviewData.lineParams = { a, b, c };
           setPreviewData(newPreviewData);
-        } else if (mode === 'circle' && pendingPoints.length === 1) {
+        } else if ((mode === 'circle' || mode === 'circle_center_point') && pendingPoints.length === 1) {
           const newPreviewData: PreviewData = { type: 'circle' };
           const radius = Math.sqrt(
             Math.pow(worldPos.x - pendingPoints[0].x, 2) +
@@ -900,10 +1437,132 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
           newPreviewData.center = pendingPoints[0];
           newPreviewData.radius = radius;
           setPreviewData(newPreviewData);
+        } else if (mode === 'circle_point_radius' && pendingPoints.length === 1) {
+          const newPreviewData: PreviewData = { type: 'circle' };
+          const radius = Math.sqrt(
+            Math.pow(worldPos.x - pendingPoints[0].x, 2) +
+              Math.pow(worldPos.y - pendingPoints[0].y, 2)
+          );
+          newPreviewData.center = worldPos;
+          newPreviewData.radius = radius;
+          setPreviewData(newPreviewData);
+        } else if (mode === 'circle_three_points' && pendingPoints.length >= 1) {
+          if (pendingPoints.length === 1) {
+            const newPreviewData: PreviewData = { type: 'polygon' };
+            newPreviewData.points = [pendingPoints[0], worldPos];
+            setPreviewData(newPreviewData);
+          } else if (pendingPoints.length === 2) {
+            const newPreviewData: PreviewData = { type: 'polygon' };
+            newPreviewData.points = [pendingPoints[0], pendingPoints[1], worldPos];
+            setPreviewData(newPreviewData);
+          }
         } else if (mode === 'polygon' && pendingPoints.length >= 1) {
           const newPreviewData: PreviewData = { type: 'polygon' };
           newPreviewData.points = [...pendingPoints, worldPos];
           setPreviewData(newPreviewData);
+        } else if (mode === 'vector' && pendingPoints.length === 1) {
+          const newPreviewData: PreviewData = { type: 'segment' };
+          newPreviewData.startPoint = pendingPoints[0];
+          newPreviewData.endPoint = worldPos;
+          setPreviewData(newPreviewData);
+        } else if ((mode === 'perpendicular' || mode === 'parallel') && pendingPoints.length === 1 && previewData?.sourceLineParams) {
+          const newPreviewData: PreviewData = { ...previewData };
+          const { a, b } = previewData.sourceLineParams;
+          
+          let pointX: number, pointY: number;
+          const currentSnapTarget = snapTargetRef.current;
+          if (currentSnapTarget?.type === 'point' && currentSnapTarget.elementId) {
+            const existingPoint = state.construction.elements.get(currentSnapTarget.elementId);
+            if (existingPoint && existingPoint.type === 'point') {
+              pointX = existingPoint.x;
+              pointY = existingPoint.y;
+            } else {
+              pointX = worldPos.x;
+              pointY = worldPos.y;
+            }
+          } else {
+            pointX = worldPos.x;
+            pointY = worldPos.y;
+          }
+          
+          if (mode === 'perpendicular') {
+            newPreviewData.lineParams = { a: -b, b: a, c: b * pointX - a * pointY };
+          } else {
+            newPreviewData.lineParams = { a, b, c: -a * pointX - b * pointY };
+          }
+          setPreviewData(newPreviewData);
+        } else if (mode === 'perpendicular_bisector' && pendingPoints.length === 1) {
+          const newPreviewData: PreviewData = { type: 'bisector' };
+          const p1 = pendingPoints[0];
+          const dx = worldPos.x - p1.x;
+          const dy = worldPos.y - p1.y;
+          const mx = (p1.x + worldPos.x) / 2;
+          const my = (p1.y + worldPos.y) / 2;
+          newPreviewData.lineParams = { a: dx, b: dy, c: -(dx * mx + dy * my) };
+          setPreviewData(newPreviewData);
+        } else if (mode === 'angular_bisector' && pendingPoints.length >= 1) {
+          const newPreviewData: PreviewData = { type: 'angular' };
+          if (pendingPoints.length === 1) {
+            newPreviewData.points = [pendingPoints[0], worldPos];
+          } else if (pendingPoints.length === 2) {
+            const vertex = pendingPoints[1];
+            const p1 = pendingPoints[0];
+            const p2 = worldPos;
+            
+            const dx1 = p1.x - vertex.x;
+            const dy1 = p1.y - vertex.y;
+            const dx2 = p2.x - vertex.x;
+            const dy2 = p2.y - vertex.y;
+            
+            const len1 = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+            const len2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+            
+            const nx1 = dx1 / len1;
+            const ny1 = dy1 / len1;
+            const nx2 = dx2 / len2;
+            const ny2 = dy2 / len2;
+            
+            const bx = nx1 + nx2;
+            const by = ny1 + ny2;
+            
+            const blen = Math.sqrt(bx * bx + by * by);
+            
+            let a, b, c;
+            if (blen < 1e-10) {
+              a = -ny1;
+              b = nx1;
+              c = ny1 * vertex.x - nx1 * vertex.y;
+            } else {
+              const nbx = bx / blen;
+              const nby = by / blen;
+              a = -nby;
+              b = nbx;
+              c = nby * vertex.x - nbx * vertex.y;
+            }
+            
+            newPreviewData.lineParams = { a, b, c };
+          }
+          setPreviewData(newPreviewData);
+        } else if ((mode === 'rotate' || mode === 'scale') && pendingPoints.length === 2) {
+          const selectedId = pendingPoints[0].id;
+          const centerPoint = pendingPoints[1];
+          const selectedElement = selectedId ? state.construction.elements.get(selectedId) : null;
+          
+          if (selectedElement && selectedElement.type === 'point') {
+            const x = selectedElement.x;
+            const y = selectedElement.y;
+            
+            if (mode === 'rotate') {
+              const angle = Math.atan2(worldPos.y - centerPoint.y, worldPos.x - centerPoint.x) - 
+                           Math.atan2(y - centerPoint.y, x - centerPoint.x);
+              applyRotateTransform(selectedElement, centerPoint.x, centerPoint.y, angle);
+            } else {
+              const dist1 = Math.sqrt(Math.pow(x - centerPoint.x, 2) + Math.pow(y - centerPoint.y, 2));
+              const dist2 = Math.sqrt(Math.pow(worldPos.x - centerPoint.x, 2) + Math.pow(worldPos.y - centerPoint.y, 2));
+              const scale = dist1 > 0 ? dist2 / dist1 : 1;
+              applyScaleTransform(selectedElement, centerPoint.x, centerPoint.y, scale);
+            }
+          }
         } else {
           setPreviewData(null);
         }
@@ -924,6 +1583,8 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
       setHovered,
       getSnappedPosition,
       renderElements,
+      applyRotateTransform,
+      applyScaleTransform,
     ]
   );
 
@@ -954,6 +1615,16 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
       setBoxSelection(null);
     }
     
+    if (state.interaction.mode === 'rotate' && pendingPoints.length === 2) {
+      setPendingPoints([]);
+      setPreviewData(null);
+    }
+    
+    if (state.interaction.mode === 'scale' && pendingPoints.length === 2) {
+      setPendingPoints([]);
+      setPreviewData(null);
+    }
+    
     if (isPanningRef.current) {
       isPanningRef.current = false;
       panStartRef.current = null;
@@ -961,7 +1632,7 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
         canvasRef.current.style.cursor = 'grab';
       }
     }
-  }, [state.interaction.isDragging, endDrag, boxSelection, state.construction.elements, selectElements]);
+  }, [state.interaction.isDragging, state.interaction.mode, endDrag, boxSelection, state.construction.elements, selectElements, pendingPoints]);
 
   const handleWheel = useCallback(
     (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -985,7 +1656,7 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
     <div
       ref={containerRef}
       className={className}
-      style={{ width: `${width}px`, height: `${height}px`, backgroundColor: '#ffffff', touchAction: 'none', ...style }}
+      style={{ width: `${width}px`, height: `${height}px`, backgroundColor: '#ffffff', touchAction: 'none', position: 'relative', ...style }}
     >
       <canvas
         ref={canvasRef}
@@ -1000,6 +1671,93 @@ export const EuclidianView = forwardRef<EuclidianViewRef, EuclidianViewProps>(fu
           display: 'block',
         }}
       />
+      <div style={{ position: 'absolute', bottom: '10px', left: '10px', display: 'flex', gap: '8px', backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: '8px', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' }}>
+        <button
+          onClick={() => {
+            const renderer = rendererRef.current;
+            if (renderer) {
+              renderer.zoom(1.1, width / 2, height / 2);
+              renderElements();
+            }
+          }}
+          title="放大"
+          style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '4px',
+            border: '1px solid #e5e7eb',
+            backgroundColor: 'white',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <ZoomIn size={16} />
+        </button>
+        <button
+          onClick={() => {
+            const renderer = rendererRef.current;
+            if (renderer) {
+              renderer.zoom(0.9, width / 2, height / 2);
+              renderElements();
+            }
+          }}
+          title="缩小"
+          style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '4px',
+            border: '1px solid #e5e7eb',
+            backgroundColor: 'white',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <ZoomOut size={16} />
+        </button>
+        <div style={{ width: '1px', height: '24px', backgroundColor: '#e5e7eb' }} />
+        <button
+          onClick={undo}
+          disabled={!canUndo}
+          title="撤销 (Ctrl+Z)"
+          style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '4px',
+            border: '1px solid #e5e7eb',
+            backgroundColor: canUndo ? 'white' : '#f9fafb',
+            color: canUndo ? '#374151' : '#d1d5db',
+            cursor: canUndo ? 'pointer' : 'not-allowed',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Undo2 size={16} />
+        </button>
+        <button
+          onClick={redo}
+          disabled={!canRedo}
+          title="重做 (Ctrl+Y)"
+          style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '4px',
+            border: '1px solid #e5e7eb',
+            backgroundColor: canRedo ? 'white' : '#f9fafb',
+            color: canRedo ? '#374151' : '#d1d5db',
+            cursor: canRedo ? 'pointer' : 'not-allowed',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Redo2 size={16} />
+        </button>
+      </div>
     </div>
   );
 });

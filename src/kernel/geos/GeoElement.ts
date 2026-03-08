@@ -28,6 +28,7 @@ export interface IGeoElement {
   getX?(): number;
   getY?(): number;
   setCoords?(x: number, y: number, z?: number): void;
+  setCircleCoords?(center: any, radius: number): void;
 }
 
 export type GeoElementType = 

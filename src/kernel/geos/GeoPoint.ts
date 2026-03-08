@@ -168,14 +168,16 @@ export class GeoPoint extends GeoElementBase implements Pathable {
    */
   updateCoords(x: number, y: number): void {
     if (this.path) {
-      // 先设置坐标
-      this.x = x;
-      this.y = y;
-      this.z = 1;
-      // 然后让路径限制它
-      const pointElement = { x, y } as any;
-      this.path.pointChanged(pointElement);
-      this.setCoords(pointElement.x, pointElement.y);
+      // 先设置临时坐标
+      const tempPoint = {
+        getX: () => x,
+        getY: () => y,
+        setCoords: (newX: number, newY: number) => {
+          this.setCoords(newX, newY);
+        }
+      };
+      // 让路径限制它
+      this.path.pointChanged(tempPoint);
     } else {
       this.setCoords(x, y);
     }

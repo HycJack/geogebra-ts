@@ -2,7 +2,8 @@
  * 几何元素实现
  * 对应 Java 版本的 kernel/geos 包
  */
-import { ConstructionElement, Construction } from '../../types';
+import { ConstructionElement } from '../../types';
+import { Construction } from '../Construction';
 import { AlgoElement } from '../algos/AlgoElement';
 import { IGeoElement } from './GeoElement';
 import { Path, Pathable } from '../Path';

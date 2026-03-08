@@ -112,6 +112,7 @@ export interface GeoCircleElement extends GeoElementBase {
   type: 'circle';
   centerId: string;
   radius: number;
+  edgePointId?: string;
 }
 
 export interface GeoPolygonElement extends GeoElementBase {
@@ -153,14 +154,24 @@ export type ToolMode =
   | 'ray'
   | 'vector'
   | 'circle'
-  | 'circle3'
+  | 'circle_center_point'
+  | 'circle_center_radius'
+  | 'circle_point_radius'
+  | 'circle_three_points'
+  | 'line_tools'
   | 'polygon'
   | 'text'
   | 'intersect'
   | 'midpoint'
   | 'perpendicular'
+  | 'perpendicular_bisector'
   | 'parallel'
-  | 'delete';
+  | 'angular_bisector'
+  | 'delete'
+  | 'translate'
+  | 'rotate'
+  | 'scale'
+  | 'mirror';
 
 export interface InteractionState {
   mode: ToolMode;

@@ -1,8 +1,4 @@
 import { Point } from '../types';
-import { CoordinateSystem as CommonCoordinateSystem } from '../common/coordinates/CoordinateSystem';
-
-// 重新导出 common/coordinates 的 CoordinateSystem
-export { CommonCoordinateSystem as CoordinateSystem };
 
 export function distance(p1: Point, p2: Point): number {
   const dx = p2.x - p1.x;

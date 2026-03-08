@@ -3,14 +3,12 @@
   "version": "1.0.0",
   "type": "module",
   "description": "React-based geometric drawing system inspired by GeoGebra",
-  "main": "dist/index.js",
-  "module": "dist/index.esm.js",
-  "types": "dist/index.d.ts",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint src --ext .ts,.tsx"
+    "lint": "eslint src --ext .ts,.tsx",
+    "test-snap": "npx tsx src/test-snap.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

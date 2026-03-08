@@ -243,7 +243,7 @@ export class GeoFunction {
     evaluator: (x: number) => number,
     xMin: number,
     xMax: number,
-    tolerance: number = 1e-6
+    // tolerance: number = 1e-6
   ): Array<{ x: number; y: number; type: 'min' | 'max' }> {
     const extrema: Array<{ x: number; y: number; type: 'min' | 'max' }> = [];
     const step = (xMax - xMin) / 1000;

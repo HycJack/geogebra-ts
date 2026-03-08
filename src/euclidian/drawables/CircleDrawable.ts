@@ -57,7 +57,7 @@ export class CircleDrawable extends Drawable {
         cx: this.cx,
         cy: this.cy,
         r: this.screenRadius,
-        fill: this.circle.style.fillColor,
+        fill: 'none',
         stroke: this.circle.style.strokeColor,
         strokeWidth: this.circle.style.strokeWidth,
         fillOpacity: this.circle.style.opacity,
@@ -82,6 +82,8 @@ export class CircleDrawable extends Drawable {
     const dx = screenX - this.cx;
     const dy = screenY - this.cy;
     const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
+    
+    // 检测是否在圆边缘附近
     const distance = Math.abs(distanceFromCenter - this.screenRadius);
 
     return {

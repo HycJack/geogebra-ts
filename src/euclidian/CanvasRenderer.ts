@@ -18,7 +18,7 @@ export class CanvasRenderer {
   private offsetY: number = 0;
   private devicePixelRatio: number = 1;
   
-  private options: Required<RendererOptions>;
+  public options: Required<RendererOptions>;
 
   constructor(options?: RendererOptions) {
     this.options = {

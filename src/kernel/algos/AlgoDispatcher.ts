@@ -105,14 +105,14 @@ export class AlgoDispatcher {
     return circle;
   }
 
-  createPolygon(
-    points: IGeoElement[],
-    options?: AlgoCreateOptions
-  ): IGeoElement {
-    const label = options?.label || this.kernel.generateLabel('polygon');
-    const polygon = this.createGeoElement('polygon', { label });
-    return polygon;
-  }
+  // createPolygon(
+  //   points: IGeoElement[],
+  //   options?: AlgoCreateOptions
+  // ): IGeoElement {
+  //   const label = options?.label || this.kernel.generateLabel('polygon');
+  //   const polygon = this.createGeoElement('polygon', { label });
+  //   return polygon;
+  // }
 
   createMidpoint(
     _point1: IGeoElement,

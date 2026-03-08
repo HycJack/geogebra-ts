@@ -4,9 +4,9 @@
  */
 
 import { AlgoElement } from './AlgoElement';
-import type { IGeoElement } from '../geos/GeoElement';
+// import type { IGeoElement } from '../geos/GeoElement';
 import type { Construction } from '../Construction';
-import { GeoVec3D, CoordUtils } from '../arithmetic/GeoVec3D';
+// import { GeoVec3D, CoordUtils } from '../arithmetic/GeoVec3D';
 
 export interface LineResult {
   a: number;
